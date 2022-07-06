@@ -1,0 +1,672 @@
+---
+title: "Posieux Wheat"
+author: "Jan Waelchli"
+geometry: margin=2cm
+output:
+  pdf_document:
+    toc: no
+---
+
+```{r setup, include=FALSE, echo=F, message=F, warning=F}
+
+##clear the objects from memory
+rm(list=ls())
+
+#knitr settings
+knitr::opts_chunk$set(echo=TRUE, fig.align="center")
+options(tinytex.verbose = TRUE)
+
+#set seed
+set.seed(100)
+
+#set paths
+paths <- list(DESIGN = c("design_stats.xlsx"),
+              bASV_table = c("../dadapipe_v4/4_output/bacteria_ASV/ASV100/bacteria_DAT100.tab"),
+              fASV_table = c("../dadapipe_v4/4_output/fungi_ASV/ASV100/fungi_DAT100.tab"),
+              btaxa = c("../dadapipe_v4/4_output/bacteria_ASV/ASV100/bacteria_TAXA100.tab"),
+              ftaxa = c("../dadapipe_v4/4_output/fungi_ASV/ASV100/fungi_TAXA100.tab")
+          )
+
+## load libraries
+if (!require(vegan)){BiocManager::install("vegan")}; library(vegan)
+if (!require(phyloseq)){BiocManager::install("phyloseq")}; library(phyloseq)
+if (!require(readxl)){install.packages("readxl")}; library(readxl)
+if (!require(pander)){install.packages("pander")}; library(pander)
+if (!require(ggplot2)){install.packages("ggplot2")}; library(ggplot2)
+if (!require(cowplot)){install.packages("cowplot")}; library(cowplot)
+if (!require(knitr)){install.packages("knitr")}; library(knitr)
+if (!require(rstudioapi)){install.packages("rstudioapi")}; library(rstudioapi)
+
+## set working directory to source file location
+setwd(dirname(getActiveDocumentContext()$path))
+
+```
+
+```{r import design, echo=F, message=F, warning=F}
+
+#import design file
+DESIGN <- read_excel(paths$DESIGN)
+
+#split controls from DESIGN file
+DESIGN_controls <- DESIGN[grepl("[Ee]mpty", DESIGN$SampleID),]
+DESIGN <- DESIGN[!(grepl("mpty", DESIGN$SampleID, fixed = T)),]
+
+#factors
+DESIGN$Run <- as.factor(DESIGN$Run)
+DESIGN$SampleType <- factor(DESIGN$SampleType, levels=c("root", "rhizosphere", "soil"))
+DESIGN$Genotype <- factor(DESIGN$Genotype, levels = c("WT","bx1"))
+DESIGN$Species <- factor(DESIGN$Species, levels = c("maize","wheat"))
+DESIGN$Variety <- factor(DESIGN$Variety, levels = c("W22","fiorina","claro", "sailor"))
+DESIGN$Taxa <- as.factor(DESIGN$Taxa)
+
+#additional columns
+DESIGN$bac_labels <- paste(DESIGN$Run, DESIGN$bac_f_bc, DESIGN$bac_r_bc, sep="-") #will be used to match sample names from the count table
+DESIGN$fun_labels <- paste(DESIGN$Run, DESIGN$fun_f_bc, DESIGN$fun_r_bc, sep="-")
+DESIGN$group <- as.factor(paste(DESIGN$Genotype, DESIGN$SampleType, sep="_"))
+
+#colors
+DESIGN$cols_Conditioning <- NA
+DESIGN$cols_Conditioning[DESIGN$Conditioning=="BX+"] <- "goldenrod1"
+DESIGN$cols_Conditioning[DESIGN$Conditioning=="BX-"] <- "palegreen1"
+
+DESIGN$cols_SampleType <- NA
+DESIGN$cols_SampleType[DESIGN$SampleType=="root"] <- "seagreen3"
+DESIGN$cols_SampleType[DESIGN$SampleType=="rhizosphere"] <- "deepskyblue"
+DESIGN$cols_SampleType[DESIGN$SampleType=="soil"] <- "tan4"
+
+## collapsed color vectors
+temp <- data.frame(DESIGN$Conditioning, DESIGN$cols_Conditioning)
+temp <- plyr::ddply(temp, .variables="DESIGN.cols_Conditioning", .fun=unique)
+level_cols_Conditioning <- as.character(temp[,2])
+names(level_cols_Conditioning) <- temp[,1]
+
+temp <- data.frame(DESIGN$SampleType, DESIGN$cols_SampleType)
+temp <- plyr::ddply(temp, .variables="DESIGN.cols_SampleType", .fun=unique)
+level_cols_SampleType <- as.character(temp[,2])
+names(level_cols_SampleType) <- temp[,1]
+
+#make a separate DESIGN for bac and fun, will be modified later
+bDESIGN <- DESIGN
+fDESIGN <- DESIGN
+rm(DESIGN)
+
+```
+
+```{r DAT import, echo=F, message=F, warning=F, include=F}
+
+### BACTERIA ###
+
+#import ASV table
+all_bDAT <- read.delim(paths$bASV_table, header=T, row.names=1, sep="\t")
+all_bDAT <- t(all_bDAT)
+
+
+#sort and split by samples and controls
+bDAT <- as.data.frame(all_bDAT[, bDESIGN$bac_labels])
+#sum(colnames(bDAT) == DESIGN$bac_labels) == length(DESIGN$bac_labels) #check if order is identical
+bDAT_control <- as.data.frame(all_bDAT[, !(colnames(all_bDAT) %in% bDESIGN$bac_labels)])
+rm(all_bDAT)
+
+
+### FUNGI ###
+
+#import ASV table
+all_fDAT <- read.delim(paths$fASV_table, header=T, row.names=1, sep="\t")
+all_fDAT <- t(all_fDAT)
+
+#sort and split by samples and controls
+fDAT <- as.data.frame(all_fDAT[, fDESIGN$fun_labels])
+#sum(colnames(fDAT) == DESIGN$fun_labels) == length(DESIGN$fun_labels) #check if order is identical
+fDAT_control <- as.data.frame(all_fDAT[, !(colnames(all_fDAT) %in% fDESIGN$fun_labels)])
+rm(all_fDAT)
+
+```
+
+```{r bTAX import, echo=F, message=F, warning=F, include=F}
+
+### BACTERIA ###
+
+#import taxonomy table
+bTAX <- read.table(paths$btaxa, row.names=1, sep="\t", blank.lines.skip = FALSE)
+
+#rename
+colnames(bTAX) <- c("kingdom", "phylum", "class", "order", "family", "genus")
+rownames(bTAX) <- gsub(">ASV","ASV", rownames(bTAX))
+bTAX[is.na(bTAX)] <- "unassigned"
+
+# define ASVs for removal
+r1 <- -which(bTAX$kingdom=="Eukaryota")
+r2 <- -which(bTAX$phylum=="Cyanobacteria")
+r3 <- -which(bTAX$family=="Mitochondria")
+r4 <- -which(is.na(bTAX)) #rows all na
+ASVs_to_remove <- c(r1,r2,r3,r4)
+if(length(ASVs_to_remove)>0){
+  bTAX <- bTAX[ASVs_to_remove ,]
+  bDAT <- bDAT[rownames(bTAX),]
+}
+
+#add ASV_ID to bTAXonomy file
+bTAX$ASV_ID <- rownames(bTAX)
+
+#levels
+bTAX$phylum <- as.factor(bTAX$phylum)
+levels(bTAX$phylum)[levels(bTAX$phylum) < 2 ] <- "unassigned"
+# defining ASV colors by phylum (using the bTAXonomy file)
+bTAX$labels <- as.character(bTAX$phylum)
+# create separate bTAXonomy label specifying classes of Proteobacteria
+bTAX$class <- as.factor(bTAX$class)
+try(bTAX[ bTAX$class=="Alphaproteobacteria", ]$labels <- "Alphaproteobacteria")
+try(bTAX[ bTAX$class=="Betaproteobacteria", ]$labels <- "Betaproteobacteria")
+try(bTAX[ bTAX$class=="Gammaproteobacteria", ]$labels <- "Gammaproteobacteria")
+try(bTAX[ bTAX$class=="Deltaproteobacteria", ]$labels <- "Deltaproteobacteria")
+bTAX$labels <- as.factor(bTAX$labels)
+# vector of colors for abundant phyla (and classes for Proteobacteria)
+# will be used for graphs later
+bTAX$cols_phyla <- as.character(bTAX$labels)
+bTAX$cols_phyla <- "lightgrey"
+try(bTAX[ bTAX$labels=="Alphaproteobacteria" , ]$cols_phyla <- "palegreen1")
+try(bTAX[ bTAX$labels=="Betaproteobacteria" , ]$cols_phyla <- "palegreen3")
+try(bTAX[ bTAX$labels=="Gammaproteobacteria" , ]$cols_phyla <- "palegreen4")
+try(bTAX[ bTAX$labels=="Deltaproteobacteria" , ]$cols_phyla <- "olivedrab1")
+try(bTAX[ bTAX$labels=="Actinobacteria" , ]$cols_phyla <- "indianred2")
+try(bTAX[ bTAX$labels=="Bacteroidetes" , ]$cols_phyla <- "steelblue1")
+try(bTAX[ bTAX$labels=="Firmicutes" , ]$cols_phyla <- "tan1")
+try(bTAX[ bTAX$labels=="Acidobacteria" , ]$cols_phyla <- "lightsalmon4")
+try(bTAX[ bTAX$labels=="Chloroflexi" , ]$cols_phyla <- "gold1")
+try(bTAX[ bTAX$labels=="Verrucomicrobia", ]$cols_phyla <- "orchid3")
+try(bTAX[ bTAX$labels=="Nitrospirae", ]$cols_phyla <- "peachpuff3")
+try(bTAX[ bTAX$labels=="Nanoarchaeaeota" , ]$cols_phyla <- "dodgerblue2")
+try(bTAX[ bTAX$labels=="Planctomycetes" , ]$cols_phyla <- "pink")
+try(bTAX[ bTAX$labels=="Thaumarchaeota" , ]$cols_phyla <- "goldenrod2")
+try(bTAX[ bTAX$labels=="Patescibacteria" , ]$cols_phyla <- "darkgoldenrod3")
+try(bTAX[ bTAX$labels=="Rokubacteria" , ]$cols_phyla <- "darkorchid3")
+## collapsed color vector for each level
+temp <- data.frame(bTAX$labels, bTAX$cols_phyla)
+temp <- plyr::ddply(temp, .variables="bTAX.labels", .fun=unique)
+bTAX_level_cols_phyla <- as.character(temp[,2])
+names(bTAX_level_cols_phyla) <- temp[,1]
+
+# remove no longer used files
+rm(temp)
+
+```
+
+```{r fTAX import, echo=F, message=F, warning=F, include=F}
+
+### FUNGI ###
+
+#import taxonomy table
+fTAX <- read.table(paths$ftaxa, row.names=1, sep="\t", blank.lines.skip = FALSE)
+
+#rename
+colnames(fTAX) <- c("kingdom", "phylum", "class", "order", "family", "genus")
+rownames(fTAX) <- gsub(">ASV","ASV", rownames(fTAX))
+fTAX[is.na(fTAX)] <- "unassigned"
+
+#rename fTAX
+colnames(fTAX) <- c("kingdom", "phylum", "class", "order", "family", "genus", "species")
+fTAX$kingdom <- gsub("k__","", fTAX$kingdom )
+fTAX$phylum <- gsub("p__","", fTAX$phylum )
+fTAX$class <- gsub("c__","", fTAX$class )
+fTAX$order <- gsub("o__","", fTAX$order )
+fTAX$family <- gsub("f__","", fTAX$family )
+fTAX$genus <- gsub("g__","", fTAX$genus )
+fTAX$species <- gsub("s__","", fTAX$species )
+
+# define ASVs for removal
+r1 <- -which(fTAX$kingdom=="Protista")
+r2 <- -which(fTAX$kingdom=="Plantae")
+r3 <- -which(fTAX$kingdom=="Protozoa")
+r4 <- -which(fTAX$kingdom=="Animalia")
+r5 <- -which(is.na(fTAX)) #rows all na
+ASVs_to_remove <- c(r1,r2,r3,r4, r5)
+if(length(ASVs_to_remove)>0){
+ fTAX <- fTAX[ASVs_to_remove ,]
+}
+
+#rename unassigned ASVs
+fTAX[is.na(fTAX)] <- "unassigned"
+
+#add ASV_ID to taxonomy file
+fTAX$ASV_ID <- rownames(fTAX)
+
+#levels
+fTAX$phylum <- as.factor(fTAX$phylum)
+levels(fTAX$phylum)[levels(fTAX$phylum) < 2 ] <- "unassigned"
+#Defining fASV colors by phylum (using the taxonomy file)
+fTAX$labels <- as.character(fTAX$phylum)
+fTAX$labels <- as.factor(fTAX$labels)
+levels(fTAX$labels)
+#vector of colors for abundant phyla 
+fTAX$cols_phyla <- fTAX$labels
+fTAX$cols_phyla <- "lightgrey"
+try(fTAX[fTAX$labels=="Ascomycota", ]$cols_phyla <- "dodgerblue2")
+try(fTAX[fTAX$labels=="Basidiomycota", ]$cols_phyla <- "firebrick1")
+try(fTAX[fTAX$labels=="Kickxellomycota", ]$cols_phyla <- "seagreen4")
+try(fTAX[fTAX$labels=="Chytridiomycota", ]$cols_phyla <- "goldenrod2")
+try(fTAX[fTAX$labels=="Mortierellomycota" , ]$cols_phyla <- "mediumorchid1")
+try(fTAX[fTAX$labels=="unassigned" , ]$cols_phyla <- "dimgrey")
+
+#collapsed color vector for each level
+temp <- data.frame(fTAX$labels, fTAX$cols_phyla)
+temp <- plyr::ddply(temp, .variables="fTAX.labels", .fun=unique)
+fTAX_level_cols_phyla <- as.character(temp[,2])
+names(fTAX_level_cols_phyla) <- temp[,1]
+
+# remove no longer used files
+rm(temp)
+
+```
+
+```{r subsetting and rarefaction bacteria, echo=F, message=F, warning=F}
+
+### BACTERIA ###
+
+###########################
+###remove maize samples###
+species <- "maize"
+samples_to_remove <- bDESIGN$bac_labels[bDESIGN$Species == species]
+bDESIGN <- droplevels(bDESIGN[!(bDESIGN$bac_labels %in% samples_to_remove),])
+bDAT <- bDAT[,!(colnames(bDAT) %in% samples_to_remove)]
+ASVs_to_remove <- names(which(rowSums(bDAT) == 0))
+bDAT <- bDAT[!(rownames(bDAT) %in% ASVs_to_remove),]
+bTAX <- bTAX[!(rownames(bTAX) %in% ASVs_to_remove),]
+###########################
+
+#remove samples with very low seq numbers
+threshold <-  8000
+samples_to_remove <- names(which(colSums(bDAT) < threshold))
+
+bDESIGN <- bDESIGN[!(bDESIGN$bac_labels %in% samples_to_remove),]
+bDAT <- bDAT[,!(colnames(bDAT) %in% samples_to_remove)]
+ASVs_to_remove <- names(which(rowSums(bDAT) == 0))
+bDAT <- bDAT[!(rownames(bDAT) %in% ASVs_to_remove),]
+bTAX <- bTAX[!(rownames(bTAX) %in% ASVs_to_remove),]
+#print(paste(length(samples_to_remove),"samples removed"))
+
+## define rarefication threshold 
+#(number of reads from the sample with the lowest seq-depth)
+b_rare <- min(colSums(bDAT))
+
+# rarefication with library(vegan)
+bDAT_rare <- t(rrarefy(t(bDAT), b_rare))
+bDAT_rare <- bDAT_rare[rowSums(bDAT_rare) > 0,]  # removal of rows with 0 values
+
+```
+
+```{r subsetting and rarefaction fungi, echo=F, message=F, warning=F}
+
+### FUNGI ###
+
+###########################
+#remove maize samples###
+species <- "maize"
+samples_to_remove <- fDESIGN$fun_labels[fDESIGN$Species == species]
+fDESIGN <- droplevels(fDESIGN[!(fDESIGN$fun_labels %in% samples_to_remove),])
+fDAT <- fDAT[,!(colnames(fDAT) %in% samples_to_remove)]
+ASVs_to_remove <- names(which(rowSums(fDAT) == 0))
+fDAT <- fDAT[!(rownames(fDAT) %in% ASVs_to_remove),]
+fTAX <- fTAX[!(rownames(fTAX) %in% ASVs_to_remove),]
+###########################
+
+#remove samples with very low seq numbers
+threshold <-  1200
+samples_to_remove <- names(which(colSums(fDAT) < threshold))
+
+fDESIGN <- fDESIGN[!(fDESIGN$fun_labels %in% samples_to_remove),]
+fDAT <- fDAT[,!(colnames(fDAT) %in% samples_to_remove)]
+ASVs_to_remove <- names(which(rowSums(fDAT) == 0))
+fDAT <- fDAT[!(rownames(fDAT) %in% ASVs_to_remove),]
+fTAX <- fTAX[!(rownames(fTAX) %in% ASVs_to_remove),]
+#print(paste(length(samples_to_remove),"samples removed"))
+
+## define rarefication threshold 
+#(number of reads from the sample with the lowest seq-depth)
+f_rare <- min(colSums(fDAT))
+
+# rarefication with library(vegan)
+fDAT_rare <- t(rrarefy(t(fDAT), f_rare))
+fDAT_rare <- fDAT_rare[rowSums(fDAT_rare) > 0,]  # removal of rows with 0 values
+
+```
+
+```{r bac phyla, echo=F, warning=F, message=F}
+
+### BACTERIA ###
+
+# Data as bPHYLOSEQ object
+
+#change order for melting later
+bTAX <- bTAX[,c("labels", "kingdom", "phylum", "class", "order", "family", "genus", "ASV_ID", "cols_phyla")]
+
+#create phyloseq objects
+rownames(bDESIGN) <- bDESIGN$bac_labels
+bPHYSEQ <- phyloseq(sample_data(as.data.frame(bDESIGN)),
+                    otu_table(as.matrix(bDAT_rare), taxa_are_rows=T),
+                    tax_table(as.matrix(bTAX[rownames(bDAT_rare),])))
+
+# agglomerate data by labels 
+bPHYSEQ_phyla <- tax_glom(bPHYSEQ, "labels") # merge by 'labels' 
+bPHYSEQ_phyla <- transform_sample_counts(bPHYSEQ_phyla, function(x) 100 * x/sum(x)) 
+
+# melt phyloseq object
+bPHYSEQ_phyla_melt <- psmelt(bPHYSEQ_phyla) 
+
+# Defining ASV colors by labels
+bPHYSEQ_phyla_melt$labels <- as.factor(bPHYSEQ_phyla_melt$labels)
+bPHYSEQ_phyla_melt$cols <- as.character(bPHYSEQ_phyla_melt$labels)
+
+# attributing previously assigned colors
+# bTAX_level_cols_phyla
+for(i in names(bTAX_level_cols_phyla)[names(bTAX_level_cols_phyla) %in% levels(bPHYSEQ_phyla_melt$labels)]){
+  bPHYSEQ_phyla_melt[bPHYSEQ_phyla_melt$labels==paste(i), ]$cols <- bTAX_level_cols_phyla[paste(i)]
+}
+
+# Defining high abundant Phyla
+# Phyla with MEAN abundances higher than 1% relative abundances
+bPHYSEQ_phyla_abu <-  rownames(otu_table(bPHYSEQ_phyla))[apply(otu_table(bPHYSEQ_phyla), 1, mean, na.rm=T) > 1]
+bPHYSEQ_phyla_abuP <- tax_table(bPHYSEQ_phyla)[rownames(tax_table(bPHYSEQ_phyla)) %in% bPHYSEQ_phyla_abu, "labels"]
+
+# Defining low abundant Phyla
+# Phyla with MEAN abundances lower than 1% relative abundances
+bPHYSEQ_phyla_low <-  rownames(otu_table(bPHYSEQ_phyla))[apply(otu_table(bPHYSEQ_phyla), 1, mean, na.rm=T) < 1]
+bPHYSEQ_phyla_lowP <- tax_table(bPHYSEQ_phyla)[rownames(tax_table(bPHYSEQ_phyla)) %in% bPHYSEQ_phyla_low, "labels"]
+
+# subsetting the color vector to abundant labels and classes
+# delete labels name of low-abundant phyla (for plot) and put them at the bottom
+bPHYSEQ_phyla_melt$labels_2 <- as.character(bPHYSEQ_phyla_melt$labels)
+bPHYSEQ_phyla_melt[bPHYSEQ_phyla_melt$labels_2 %in% bPHYSEQ_phyla_lowP, ]$labels_2 <- "Low abundant phyla"
+bPHYSEQ_phyla_melt$labels_2 <- as.factor(bPHYSEQ_phyla_melt$labels_2)
+
+# color matrix for plot
+bcol_class <- bPHYSEQ_phyla_melt$cols
+names(bcol_class) <- bPHYSEQ_phyla_melt$labels_2
+
+```
+
+```{r fun phyla, echo=F, warning=F, message=F}
+
+### Fungi ###
+
+# Data as bPHYLOSEQ object
+
+#change order for melting later
+fTAX <- fTAX[,c("labels", "kingdom", "phylum", "class", "order", "family", "genus", "ASV_ID", "cols_phyla")]
+
+#create phyloseq objects
+rownames(fDESIGN) <- fDESIGN$fun_labels
+fPHYSEQ <- phyloseq(sample_data(as.data.frame(fDESIGN)),
+                    otu_table(as.matrix(fDAT_rare), taxa_are_rows=T),
+                    tax_table(as.matrix(fTAX[rownames(fDAT_rare),])))
+
+# agglomerate data by labels 
+fPHYSEQ_phyla <- tax_glom(fPHYSEQ, "labels") # merge by 'labels' 
+fPHYSEQ_phyla <- transform_sample_counts(fPHYSEQ_phyla, function(x) 100 * x/sum(x)) 
+
+# melt phyloseq object
+fPHYSEQ_phyla_melt <- psmelt(fPHYSEQ_phyla) 
+
+# Defining ASV colors by labels
+fPHYSEQ_phyla_melt$labels <- as.factor(fPHYSEQ_phyla_melt$labels)
+fPHYSEQ_phyla_melt$cols <- as.character(fPHYSEQ_phyla_melt$labels)
+
+# attributing previously assigned colors
+# fTAX_level_cols_phyla
+for(i in names(fTAX_level_cols_phyla)[names(fTAX_level_cols_phyla) %in% levels(fPHYSEQ_phyla_melt$labels)]){
+  fPHYSEQ_phyla_melt[fPHYSEQ_phyla_melt$labels==paste(i), ]$cols <- fTAX_level_cols_phyla[paste(i)]
+}
+
+# Defining high abundant Phyla
+# Phyla with MEAN abundances higher than 1% relative abundances
+fPHYSEQ_phyla_abu <-  rownames(otu_table(fPHYSEQ_phyla))[apply(otu_table(fPHYSEQ_phyla), 1, mean, na.rm=T) > 1]
+fPHYSEQ_phyla_abuP <- tax_table(fPHYSEQ_phyla)[rownames(tax_table(fPHYSEQ_phyla)) %in% fPHYSEQ_phyla_abu, "labels"]
+
+# Defining low abundant Phyla
+# Phyla with MEAN abundances lower than 1% relative abundances
+fPHYSEQ_phyla_low <-  rownames(otu_table(fPHYSEQ_phyla))[apply(otu_table(fPHYSEQ_phyla), 1, mean, na.rm=T) < 1]
+fPHYSEQ_phyla_lowP <- tax_table(fPHYSEQ_phyla)[rownames(tax_table(fPHYSEQ_phyla)) %in% fPHYSEQ_phyla_low, "labels"]
+
+# subsetting the color vector to abundant labels and classes
+# delete labels name of low-abundant phyla (for plot) and put them at the bottom
+fPHYSEQ_phyla_melt$labels_2 <- as.character(fPHYSEQ_phyla_melt$labels)
+fPHYSEQ_phyla_melt[fPHYSEQ_phyla_melt$labels_2 %in% fPHYSEQ_phyla_lowP, ]$labels_2 <- "Low abundant phyla"
+fPHYSEQ_phyla_melt$labels_2 <- as.factor(fPHYSEQ_phyla_melt$labels_2)
+
+# color matrix for plot
+fcol_class <- fPHYSEQ_phyla_melt$cols
+names(fcol_class) <- fPHYSEQ_phyla_melt$labels_2
+
+```
+
+# Beta diversity
+
+```{r PERMANOVA all, warning=F, echo=F, eval=T}
+
+### BACTERIA
+
+#root
+bPHYSEQ_root <- prune_samples(sample_data(bPHYSEQ)$SampleType=="root", bPHYSEQ)
+bDAT_root <- otu_table(bPHYSEQ_root)
+bDESIGN_root <- droplevels(bDESIGN[bDESIGN$SampleType=="root",])
+bdist_root <- vegdist(t(bDAT_root), method="bray")
+bdist_paov_root <- adonis2(bdist_root ~ Conditioning * Variety + Run, data=bDESIGN_root) #wo species_varieties
+pander(bdist_paov_root, caption="Bacteria PERMANOVA: root")
+
+#rhizosphere
+bPHYSEQ_rhizosphere <- prune_samples(sample_data(bPHYSEQ)$SampleType=="rhizosphere", bPHYSEQ)
+bDAT_rhizosphere <- otu_table(bPHYSEQ_rhizosphere)
+bDESIGN_rhizosphere <- droplevels(bDESIGN[bDESIGN$SampleType=="rhizosphere",])
+bdist_rhizosphere <- vegdist(t(bDAT_rhizosphere), method="bray")
+bdist_paov_rhizosphere <- adonis2(bdist_rhizosphere ~ Conditioning * Variety + Run, data=bDESIGN_rhizosphere) #wo species_varieties
+pander(bdist_paov_rhizosphere, caption="Bacteria PERMANOVA: rhizosphere")
+
+#soil
+bPHYSEQ_soil <- prune_samples(sample_data(bPHYSEQ)$SampleType=="soil", bPHYSEQ)
+bDAT_soil <- otu_table(bPHYSEQ_soil)
+bDESIGN_soil <- droplevels(bDESIGN[bDESIGN$SampleType=="soil",])
+bdist_soil <- vegdist(t(bDAT_soil), method="bray")
+bdist_paov_soil <- adonis2(bdist_soil ~ Conditioning * Variety + Run, data=bDESIGN_soil) #wo species_varieties
+pander(bdist_paov_soil, caption="Bacteria PERMANOVA: soil")
+
+
+### FUNGI
+
+#root
+fPHYSEQ_root <- prune_samples(sample_data(fPHYSEQ)$SampleType=="root", fPHYSEQ)
+fDAT_root <- otu_table(fPHYSEQ_root)
+fDESIGN_root <- droplevels(fDESIGN[fDESIGN$SampleType=="root",])
+fdist_root <- vegdist(t(fDAT_root), method="bray")
+fdist_paov_root <- adonis2(fdist_root ~ Conditioning * Variety + Run, data=fDESIGN_root) #wo species_varieties
+pander(fdist_paov_root, caption="Fungi PERMANOVA: root")
+
+#rhizosphere
+fPHYSEQ_rhizosphere <- prune_samples(sample_data(fPHYSEQ)$SampleType=="rhizosphere", fPHYSEQ)
+fDAT_rhizosphere <- otu_table(fPHYSEQ_rhizosphere)
+fDESIGN_rhizosphere <- droplevels(fDESIGN[fDESIGN$SampleType=="rhizosphere",])
+fdist_rhizosphere <- vegdist(t(fDAT_rhizosphere), method="bray")
+fdist_paov_rhizosphere <- adonis2(fdist_rhizosphere ~ Conditioning * Variety + Run, data=fDESIGN_rhizosphere) #wo species_varieties
+pander(fdist_paov_rhizosphere, caption="Fungi PERMANOVA: rhizosphere")
+
+#soil
+fPHYSEQ_soil <- prune_samples(sample_data(fPHYSEQ)$SampleType=="soil", fPHYSEQ)
+fDAT_soil <- otu_table(fPHYSEQ_soil)
+fDESIGN_soil <- droplevels(fDESIGN[fDESIGN$SampleType=="soil",])
+fdist_soil <- vegdist(t(fDAT_soil), method="bray")
+fdist_paov_soil <- adonis2(fdist_soil ~ Conditioning * Variety + Run, data=fDESIGN_soil) #wo species_varieties
+pander(fdist_paov_soil, caption="Fungi PERMANOVA: soil")
+
+```
+
+### Figure 1 \| CAP - Conditioning
+
+\vspace{5mm}
+
+```{r CAP Conditioning compartments, echo=F, warning=F, eval=T, fig.height=7, fig.width=6}
+
+variability_table <- function(cca){
+  chi <- c(cca$tot.chi, cca$CCA$tot.chi, cca$CA$tot.chi)
+  variability_table <- cbind(chi, chi / chi[1])
+  colnames(variability_table) <- c("inertia", "proportion")
+  rownames(variability_table) <- c("total", "constrained", "unconstrained") 
+  return(variability_table)
+}
+
+### BACTERIA
+
+#root
+CAP_bray <- ordinate(bPHYSEQ_root, method="CAP", ~ Conditioning * Variety + Run, distance="bray") #CAP
+CAP_bray_var_tbl <- variability_table(CAP_bray) # extract variation details
+phylum.sum <- tapply(taxa_sums(bPHYSEQ_root), tax_table(bPHYSEQ_root)[, "labels"], sum, na.rm=T)
+topphyla <- names(sort(phylum.sum, T))[1:6]
+phy_sub <- prune_taxa((tax_table(bPHYSEQ_root)[, "labels"] %in% topphyla), bPHYSEQ_root)
+#plot
+p0 <- phyloseq::plot_ordination(phy_sub, CAP_bray, color="Conditioning", title =  "Root bacteria", axes=c(1,2))
+p0$layers <- p0$layers[-1]
+p0 <- p0 + geom_point(size=3, shape=16)
+p0 <- p0 + scale_color_manual(values=level_cols_Conditioning)
+p0 <- p0 + scale_size_manual(values=level_cols_Conditioning)
+p0 <- p0 + theme_bw()
+fig_bac_root <- p0
+
+
+#rhizosphere
+CAP_bray <- ordinate(bPHYSEQ_rhizosphere, method="CAP", ~ Conditioning * Variety + Run, distance="bray") #CAP
+CAP_bray_var_tbl <- variability_table(CAP_bray) # extract variation details
+phylum.sum <- tapply(taxa_sums(bPHYSEQ_rhizosphere), tax_table(bPHYSEQ_rhizosphere)[, "labels"], sum, na.rm=T)
+topphyla <- names(sort(phylum.sum, T))[1:6]
+phy_sub <- prune_taxa((tax_table(bPHYSEQ_rhizosphere)[, "labels"] %in% topphyla), bPHYSEQ_rhizosphere)
+#plot
+p0 <- phyloseq::plot_ordination(phy_sub, CAP_bray, color="Conditioning", title =  "Rhizosphere bacteria", axes=c(1,2))
+p0$layers <- p0$layers[-1]
+p0 <- p0 + geom_point(size=3, shape=16)
+p0 <- p0 + scale_color_manual(values=level_cols_Conditioning)
+p0 <- p0 + scale_size_manual(values=level_cols_Conditioning)
+p0 <- p0 + theme_bw()
+fig_bac_rhizosphere <- p0
+
+### FUNGI
+
+#root
+CAP_bray <- ordinate(fPHYSEQ_root, method="CAP", ~ Conditioning * Variety + Run, distance="bray") #CAP
+CAP_bray_var_tbl <- variability_table(CAP_bray) # extract variation details
+phylum.sum <- tapply(taxa_sums(fPHYSEQ_root), tax_table(fPHYSEQ_root)[, "labels"], sum, na.rm=T)
+topphyla <- names(sort(phylum.sum, T))[1:6]
+phy_sub <- prune_taxa((tax_table(fPHYSEQ_root)[, "labels"] %in% topphyla), fPHYSEQ_root)
+#plot
+p0 <- phyloseq::plot_ordination(phy_sub, CAP_bray, color="Conditioning", title =  "Root fungi", axes=c(1,2))
+p0$layers <- p0$layers[-1]
+p0 <- p0 + geom_point(size=3, shape=16)
+p0 <- p0 + scale_color_manual(values=level_cols_Conditioning)
+p0 <- p0 + scale_size_manual(values=level_cols_Conditioning)
+p0 <- p0 + theme_bw()
+fig_fun_root <- p0
+
+
+#rhizosphere
+CAP_bray <- ordinate(fPHYSEQ_rhizosphere, method="CAP", ~ Conditioning * Variety + Run, distance="bray") #CAP
+CAP_bray_var_tbl <- variability_table(CAP_bray) # extract variation details
+phylum.sum <- tapply(taxa_sums(fPHYSEQ_rhizosphere), tax_table(fPHYSEQ_rhizosphere)[, "labels"], sum, na.rm=T)
+topphyla <- names(sort(phylum.sum, T))[1:6]
+phy_sub <- prune_taxa((tax_table(fPHYSEQ_rhizosphere)[, "labels"] %in% topphyla), fPHYSEQ_rhizosphere)
+#plot
+p0 <- phyloseq::plot_ordination(phy_sub, CAP_bray, color="Conditioning", title =  "Rhizosphere fungi", axes=c(1,2))
+p0$layers <- p0$layers[-1]
+p0 <- p0 + geom_point(size=3, shape=16)
+p0 <- p0 + scale_color_manual(values=level_cols_Conditioning)
+p0 <- p0 + scale_size_manual(values=level_cols_Conditioning)
+#p0 <- p0 + scale_shape_manual(values=c(1,16))
+p0 <- p0 + theme_bw()
+fig_fun_rhizosphere <- p0
+
+### PLOT
+#combine the plots (library cowplot)
+fig_1 <- plot_grid(fig_bac_root + theme(legend.position="none"),
+               fig_fun_root + theme(legend.position="none") + labs(colour=""),
+               fig_bac_rhizosphere + theme(legend.position="none") + labs(colour=""),
+               fig_fun_rhizosphere + theme(legend.position="none") + labs(colour=""),
+               align = "hv",
+               nrow=2)
+
+
+
+#add legend
+legend <- get_legend(fig_bac_root + theme(legend.position="top") + labs(fill="Wheat Conditioning"))
+fig_1 <- plot_grid(fig_1, legend, nrow=2, rel_heights=c(1, .1))
+
+#print
+fig_1
+
+```
+
+
+\pagebreak
+
+# Taxonomy
+
+### Figure 2.1 | Bacteria: Phylum level taxonomy
+
+\vspace{5mm}
+
+```{r bac fig, echo=F, warning=F, message=F, fig.height=13, fig.width=15}
+
+#sort
+bPHYSEQ_phyla_melt <- bPHYSEQ_phyla_melt[order(bPHYSEQ_phyla_melt$Conditioning),]
+bPHYSEQ_phyla_melt <- bPHYSEQ_phyla_melt[order(bPHYSEQ_phyla_melt$SampleType),]
+
+bcol_class[names(bcol_class)=="Low abundant phyla"] <- "lightgrey"
+
+#factor
+bPHYSEQ_phyla_melt$SampleID <- factor(bPHYSEQ_phyla_melt$SampleID, levels=unique(bPHYSEQ_phyla_melt$SampleID)) #keep the order as it is now
+bPHYSEQ_phyla_melt$labels_2 <- factor(bPHYSEQ_phyla_melt$labels_2, levels = unique(bPHYSEQ_phyla_melt$labels_2)[c(1:9,11:12,10)])#custom reordering
+
+#plot
+fig2.1 <- ggplot(bPHYSEQ_phyla_melt, aes_string(x="SampleID", y="Abundance", fill="labels_2")) + 
+  geom_bar(stat="identity")+
+  xlab("") + 
+  ylab("Relative abundance [%]") +
+  scale_colour_manual(values=bcol_class)+
+  scale_fill_manual(values=bcol_class) +
+  guides(fill=guide_legend(title="Phylum"))+
+  facet_grid( ~ SampleType, scale="free_x", space="free_x") +
+  geom_text(data=bPHYSEQ_phyla_melt, aes(label=Conditioning, y=-5), angle=90, check_overlap=T, size=3, hjust = 0.25) + 
+  theme_bw()+
+  ggtitle("Bacteria: Taxonomy")+
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+
+#print
+print(fig2.1)
+
+```
+\vspace{5mm}
+
+### Figure 2.2 | Fungi: Phylum level taxonomy
+
+
+```{r fun fig, echo=F, warning=F, message=F, fig.height=13, fig.width=15}
+
+#sort
+fPHYSEQ_phyla_melt <- fPHYSEQ_phyla_melt[order(fPHYSEQ_phyla_melt$Conditioning),]
+fPHYSEQ_phyla_melt <- fPHYSEQ_phyla_melt[order(fPHYSEQ_phyla_melt$SampleType),]
+
+#factor
+fPHYSEQ_phyla_melt$SampleID <- factor(fPHYSEQ_phyla_melt$SampleID, levels=unique(fPHYSEQ_phyla_melt$SampleID)) #keep the order as it is now
+fPHYSEQ_phyla_melt$labels_2 <- factor(fPHYSEQ_phyla_melt$labels_2, levels = unique(fPHYSEQ_phyla_melt$labels_2)[c(1:3,5:7,4)]) #custom reordering
+
+#plot
+fig2.2 <- ggplot(fPHYSEQ_phyla_melt, aes_string(x="SampleID", y="Abundance", fill="labels_2")) + 
+  geom_bar(stat="identity")+
+  xlab("") + 
+  ylab("Relative abundance [%]") +
+  scale_colour_manual(values=fcol_class)+
+  scale_fill_manual(values=fcol_class) +
+  guides(fill=guide_legend(title="Phylum"))+
+  facet_grid( ~ SampleType, scale="free_x", space="free_x") +
+  geom_text(data=fPHYSEQ_phyla_melt, aes(label=Conditioning, y=-5), angle=90, check_overlap=T, size=3, hjust = 0.25) + 
+  theme_bw()+
+  ggtitle("Fungi: Taxonomy")+
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+
+#print
+print(fig2.2)
+
+```
