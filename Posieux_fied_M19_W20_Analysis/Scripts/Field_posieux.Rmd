@@ -1,0 +1,4017 @@
+---
+title: "Field experiment Posieux 2019-2020"
+author: "Valentin Gfeller"
+date: "2023-04-21"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# global knitter option
+knitr::opts_chunk$set(fig.align = "center", dev = 'svglite', echo = FALSE)
+
+# load packages
+library(tidyverse)
+library(ggbeeswarm, warn.conflicts = FALSE)
+library(ggpubr)
+library(ggtext)
+library(cowplot)
+library(emmeans)
+library(car)
+library(nlme)
+library(here)
+library(knitr)
+library(missMDA)
+library(FactoMineR)
+library(factoextra)
+
+# functions were written for repeatedly used code (see "/Scripts/Functions.R")
+# source functions
+source(here("Scripts", "Functions.R"))
+
+# set global option for ggplot2
+theme_set(theme_bw(base_size = 11))
+```
+
+# Figure 1 Benzoxazinoids in soil
+## Figure 1a Soil benzoxazinoids (maize harvest)
+```{r include=FALSE}
+d.bx_maize <- read.csv(here("Data", "soil_bx_maize.csv"),
+                       sep = ",", header = T) %>%
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         compound_name = factor(compound_name,
+                                levels = c("DIMBOA-Glc","HDMBOA-Glc", "DIMBOA",
+                                          "HMBOA", "MBOA", "AMPO")))
+
+d.bx_maize %>% str()
+d.bx_maize %>% summary()
+```
+
+
+```{r echo=FALSE, warning=FALSE}
+# test for differences between genotypes by Wilcoxon Rank Sum test and correct for multiple testing
+p_values <- d.bx_maize %>%
+  group_by(compound_name) %>% 
+  nest() %>% 
+  mutate(fit = map(data, ~ wilcox.test(ng_mL ~ trt, data = ., exact = FALSE)),
+         results = map(fit, broom::glance)) %>% 
+  unnest(results) %>% 
+  select(1, 5) %>%
+  ungroup() %>% 
+  mutate(
+    n      = length(.$p.value),
+    p.ad   = p.adjust(p.value, method = "fdr"),
+    p.ad_c = case_when(
+      p.ad < 0.001 ~ as.character("p < 0.001"),
+      TRUE  ~ paste0("p = ", sprintf("%.3f", p.ad))),
+    x      = 1.5,
+    y      = Inf)
+
+# check values below LOD (limit of detection)
+t.lod <- d.bx_maize %>%
+  group_by(compound_name, trt) %>%
+  summarise(
+    n         = n(),
+    Below_LOD = sum(ng_mL == 0, na.rm = TRUE),
+    .groups   = "drop") %>%
+  kable(caption = "Count values below limit of detection")
+
+# use information for plot
+d.lod <- tibble(
+  label = c("LOD"),
+  compound_name = c("DIMBOA-Glc", "HDMBOA-Glc", "DIMBOA", "HMBOA"),
+  trt = "b",
+  y = 0) %>% 
+  mutate(compound_name = factor(compound_name, 
+                                levels = c("DIMBOA-Glc","HDMBOA-Glc", "DIMBOA",
+                                           "HMBOA", "MBOA", "AMPO")))
+# plot
+p.bx_cond <- d.bx_maize %>% 
+  ggplot_soil_box(x = trt, y = ng_mL, fill = trt, facet = compound_name) +
+    labs(y = "Concentration (ng/mL)") +
+    scale_y_continuous(expand = expansion(mult = c(0.1, 0.25))) + 
+    geom_text(
+      data    = p_values,
+      mapping = aes(x = x, y = y, label = p.ad_c, fill = NULL),
+      vjust = 2,
+      size = 3) + 
+    geom_text(
+      data    = d.lod,
+      mapping = aes(x = trt, y = y, label = label, fill = NULL),
+      vjust = -1,
+      size = 3)
+
+p.bx_cond
+```
+
+## Figure 1b Soil benzoxazinoids (wheat emergence)
+```{r include=FALSE}
+d.bx_wh_start <- read.csv(here("Data", "soil_bx_wh_start.csv"),
+                          sep = ",", header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         compound_name = factor(compound_name, 
+                                levels = c("DIMBOA-Glc","HDMBOA-Glc", "DIMBOA",
+                                          "HMBOA", "MBOA", "AMPO")))
+
+d.bx_wh_start %>% str()
+d.bx_wh_start %>% summary()
+```
+
+```{r echo=FALSE, warning=FALSE}
+# test for differences between genotypes by Wilcoxon Rank Sum test and correct for multiple testing
+p_values_wh_start <- d.bx_wh_start %>%
+  group_by(compound_name) %>% 
+  nest() %>% 
+  mutate( fit = map(data, ~ wilcox.test(ng_mL ~ trt, data = ., exact = FALSE)),
+          results = map(fit, broom::glance)) %>% 
+  unnest(results)%>% 
+  select(1, 5)%>%
+  ungroup() %>% 
+  mutate(
+    n      = length(.$p.value),
+    p.ad   = p.adjust(p.value, method = "fdr"),
+    p.ad_c = case_when(
+      p.ad < 0.001 ~ as.character("p < 0.001"),
+      TRUE  ~ paste0("p = ", sprintf("%.3f", p.ad))),
+    x      = 1.5,
+    y      = Inf)
+
+# check values below LOD
+t.lod <- d.bx_wh_start %>%
+  group_by(compound_name, trt) %>%
+  summarise(
+    n        = n(),
+    Below_LOD = sum(ng_mL == 0, na.rm = TRUE)) %>%
+  kable(caption = "Count values below limit of detection")
+
+# use information for plot
+d.lod <- tibble(
+  label = c("LOD"),
+  compound_name = c("DIMBOA"),
+  trt = "b",
+  y = 0) %>% 
+  mutate(compound_name = factor(compound_name, 
+                                levels = c("DIMBOA-Glc","HDMBOA-Glc", "DIMBOA",
+                                          "HMBOA", "MBOA", "AMPO")))
+
+p.bx_wh_sowing <- d.bx_wh_start %>% 
+  ggplot_soil_box_res(x = trt, y = ng_mL, fill = trt, facet = compound_name) +
+    labs(y = "Concentration (ng/mL)")+ 
+    geom_text(
+      data    = p_values_wh_start,
+      mapping = aes(x = x, y = y, label = p.ad_c, fill = NULL),
+      vjust = 2,
+      size = 3) + 
+    geom_text(
+      data    = d.lod,
+      mapping = aes(x = trt, y = y, label = label, fill = NULL),
+      vjust = -1,
+      size = 3) 
+
+p.bx_wh_sowing
+```
+
+## Figure.1c Soil benzoxazinoids (wheat growth)
+```{r include=FALSE}
+
+# Add strip name for linear mixed-effects model
+d.bx_wheat <- read.csv(here("Data", "soil_bx_wheat.csv"),
+                       sep = ",", header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         compound_name = factor(compound_name, 
+                               levels = c("HDMBOA-Glc", "HMBOA",
+                                          "MBOA", "AMPO")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10"))
+
+d.bx_wheat %>% str()
+d.bx_wheat %>% summary()
+```
+
+
+```{r include=FALSE}
+# Perform ANOVA on every compound for figure
+
+# HDMBOA-Glc
+d.bx_red <- d.bx_wheat %>% 
+  filter(compound_name == "HDMBOA-Glc") %>% 
+  as_tibble() %>% 
+  drop_na(ng_mL)
+
+#lme
+## including position
+m.bx_red <- lme(ng_mL ~ trt * wheat_var + pos_y, 
+                random = ~1|strip, 
+                data = d.bx_red)
+Anova(m.bx_red) # --> without pos_y
+
+##without weight
+m.bx_red_null <- lme(ng_mL ~ trt * wheat_var, 
+                     random = ~ 1 | strip,
+                     data = d.bx_red)
+plot(m.bx_red_null)
+qqnorm(m.bx_red_null, abline = c(0,1))
+
+##include weights
+m.bx_red_weights <- lme(ng_mL ~ trt * wheat_var, 
+                       random = ~ 1 | strip,
+                       weights = varIdent(form = ~ 1 | trt * wheat_var),
+                       data = d.bx_red)
+plot(m.bx_red_weights)
+qqnorm(m.bx_red_weights, abline = c(0,1))
+
+##compare models
+anova(m.bx_red_null, m.bx_red_weights) # --> include weights
+
+#Anova
+Anova(m.bx_red_weights) 
+
+#Label for ANOVA table
+lab.HDMBOA_Glc <- create_anova_table(m.bx_red_weights)[[2]]
+
+#Post-hoc test for p-val
+tab.emm.HDMBOA_Glc <- emmeans(m.bx_red_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.bx_red$ng_mL, na.rm = TRUE) * 1.05,
+            trt = NA,
+            compound_name = paste(d.bx_red$compound_name[1])) %>% 
+    select(-c(lower.CL, upper.CL, t.ratio)) %>% print()
+
+
+# HMBOA
+d.bx_red <- d.bx_wheat %>% 
+  filter(compound_name == "HMBOA") %>% 
+  as_tibble() %>% 
+  drop_na(ng_mL)
+
+#lme
+## including position
+m.bx_red <- lme(ng_mL ~ trt * wheat_var + pos_y, 
+                random = ~1|strip, 
+                data = d.bx_red)
+Anova(m.bx_red) # --> without pos_y
+
+##without weight
+m.bx_red_null <- lme(ng_mL ~ trt * wheat_var, 
+                     random = ~ 1 | strip,
+                     data = d.bx_red)
+plot(m.bx_red_null)
+qqnorm(m.bx_red_null, abline = c(0,1))
+
+##include weights
+m.bx_red_weights <- lme(ng_mL ~ trt * wheat_var, 
+                       random = ~ 1 | strip,
+                       weights = varIdent(form = ~ 1 | trt * wheat_var),
+                       data = d.bx_red)
+plot(m.bx_red_weights)
+qqnorm(m.bx_red_weights, abline = c(0,1))
+
+##compare models
+anova(m.bx_red_null, m.bx_red_weights) # --> include weights
+
+#Anova
+Anova(m.bx_red_weights) 
+
+#Label for ANOVA table
+lab.HMBOA <- create_anova_table(m.bx_red_weights)[[2]]
+
+# post-hoc test for p-val
+tab.emm.HMBOA <- emmeans(m.bx_red_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.bx_red$ng_mL, na.rm = TRUE) * 1.05,
+            trt = NA,
+            compound_name = paste(d.bx_red$compound_name[1])) %>%
+  select(-c(lower.CL, upper.CL, t.ratio)) %>% print()
+
+
+# MBOA
+d.bx_red <- d.bx_wheat %>% 
+  filter(compound_name == "MBOA") %>% 
+  as_tibble() %>% 
+  drop_na(ng_mL)
+
+#lme
+## including position
+m.bx_red <- lme(ng_mL ~ trt * wheat_var + pos_y, 
+                random = ~1|strip, 
+                data = d.bx_red)
+Anova(m.bx_red) # --> without pos_y
+
+##without weight
+m.bx_red_null <- lme(ng_mL ~ trt * wheat_var, 
+                     random = ~ 1 | strip,
+                     data = d.bx_red)
+plot(m.bx_red_null)
+qqnorm(m.bx_red_null, abline = c(0,1))
+
+##include weights
+m.bx_red_weights <- lme(ng_mL ~ trt * wheat_var, 
+                       random = ~ 1 | strip,
+                       weights = varIdent(form = ~ 1 | trt * wheat_var),
+                       data = d.bx_red)
+plot(m.bx_red_weights)
+qqnorm(m.bx_red_weights, abline = c(0,1))
+
+##compare models
+anova(m.bx_red_null, m.bx_red_weights) # --> without weights
+
+#Anova
+Anova(m.bx_red_null) 
+
+#Label for ANOVA table
+lab.MBOA <- create_anova_table(m.bx_red_null)[[2]]
+
+# post-hoc test for p-val
+tab.emm.MBOA <- emmeans(m.bx_red_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.bx_red$ng_mL , na.rm = TRUE) * 1.05,
+            trt = NA,
+            compound_name = paste(d.bx_red$compound_name[1])) %>% 
+  select(-c(lower.CL, upper.CL, t.ratio)) %>% print()
+
+
+# AMPO
+d.bx_red <- d.bx_wheat %>% 
+  filter(compound_name == "AMPO") %>% 
+  as_tibble() %>% 
+  drop_na(ng_mL)
+
+#lme
+## including position
+m.bx_red <- lme(ng_mL ~ trt * wheat_var + pos_y, 
+                random = ~1|strip, 
+                data = d.bx_red)
+Anova(m.bx_red) # --> without pos_y
+
+##without weight
+m.bx_red_null <- lme(ng_mL ~ trt * wheat_var, 
+                     random = ~ 1 | strip,
+                     data = d.bx_red)
+plot(m.bx_red_null)
+qqnorm(m.bx_red_null, abline = c(0,1))
+
+##include weights
+m.bx_red_weights <- lme(ng_mL ~ trt * wheat_var, 
+                       random = ~ 1 | strip,
+                       weights = varIdent(form = ~ 1 | trt * wheat_var),
+                       data = d.bx_red)
+plot(m.bx_red_weights)
+qqnorm(m.bx_red_weights, abline = c(0,1))
+
+##compare models
+anova(m.bx_red_null, m.bx_red_weights) # --> include weights
+
+#Anova
+Anova(m.bx_red_weights) 
+
+#Label for ANOVA table
+lab.AMPO <- create_anova_table(m.bx_red_weights)[[2]]
+
+# post-hoc test for p-val
+tab.emm.AMPO <- emmeans(m.bx_red_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.bx_red$ng_mL, na.rm = TRUE) * 1.05,
+            trt = NA,
+            compound_name = paste(d.bx_red$compound_name[1])) %>% select(-c(lower.CL, upper.CL, t.ratio)) %>% print()
+
+# combine all tab.emm
+tab.emm <- bind_rows(tab.emm.HDMBOA_Glc, tab.emm.HMBOA, 
+                     tab.emm.MBOA, tab.emm.AMPO) %>% 
+  mutate(compound_name = factor(compound_name, 
+                               levels = c("HDMBOA-Glc", "HMBOA",
+                                          "MBOA", "AMPO")))
+```
+
+```{r echo=FALSE, warning=FALSE}
+add_anova_tab <- function(tab, x, y, comp_name,  ...) {
+  geom_richtext(data = data.frame(compound_name = {{comp_name}}) %>% 
+                  mutate(compound_name = factor(compound_name, levels = 
+                                                  c("DIMBOA-Glc","HDMBOA-Glc",
+                                                    "HMBOA", "MBOA", "AMPO"))), 
+                mapping =  aes(x = {{x}}, y = {{y}}, label = {{tab}}),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.1, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+}
+
+p.bx_wh_veg <-  d.bx_wheat %>%
+ ggplot_resp_box_bx(x = wheat_var, y = ng_mL, fill = trt, t.emmeans = TRUE) +
+  labs(y = "Concentration (ng/mL)") +
+  facet_wrap(vars(compound_name), nrow = 3, scales = "free") +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.12)))   +
+  add_anova_tab(tab = lab.HMBOA, x = 0.5, y = 32.5, comp_name = "HMBOA") +
+  add_anova_tab(tab = lab.MBOA, x = 1.3, y = 7.7, comp_name = "MBOA")+
+  add_anova_tab(tab = lab.AMPO, x = 1.3, y = 1.17, comp_name = "AMPO")+
+  add_anova_tab(tab = lab.HDMBOA_Glc, x = 1.3, y = 30, comp_name = "HDMBOA-Glc") 
+
+p.bx_wh_veg
+```
+
+## Combine plots Fig. 1
+```{r fig.width=12, fig.height=7, echo=FALSE, warning=FALSE}
+fig.1 <- plot_grid(
+               p.bx_cond,
+               p.bx_wh_sowing,
+               p.bx_wh_veg,
+               labels = LETTERS[1:3],
+               align = "v", nrow = 1, rel_widths = c(1.1, 1.1, 2.2))
+
+# save
+ggsave(plot = fig.1, here("Figures", "Fig.1.svg"), 
+       width = 35, height =  17, units = "cm")
+```
+
+# Figure 2 Microbiome analysis
+See Script by Jan Waelchli and Klaus Schläppi (in Microbiome analysis folder)
+
+# Figure 3 Wheat growth
+```{r include=FALSE}
+d.veg.growth <- read.csv(here("Data", "phen_veg_growth.csv"),
+                         sep = ",", header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10"))
+
+d.veg.growth %>% str()
+d.veg.growth %>% summary()
+```
+
+## Figure 3a Germination
+```{r include=FALSE}
+#lme
+## including position
+m.seed <- lme(germ ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.veg.growth)
+Anova(m.seed) # --> without pos_y
+
+##without weight
+m.seed_null <- lme(germ ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.veg.growth)
+plot(m.seed_null)
+qqnorm(m.seed_null, abline = c(0,1))
+
+##include weights
+m.seed_weights <- lme(germ ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.veg.growth)
+plot(m.seed_weights)
+qqnorm(m.seed_weights, abline = c(0,1))
+
+##compare models
+anova(m.seed_null, m.seed_weights) # --> include weights
+
+#Anova
+Anova(m.seed_weights) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.seed_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.veg.growth$germ, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_seed <- create_anova_table(m.seed_weights)[[1]]
+lab_anova_seed <- create_anova_table(m.seed_weights)[[2]]
+
+# plot
+p.seed <- d.veg.growth %>% 
+ ggplot_resp_box(x = wheat_var, y = germ, fill = trt, t.emmeans = TRUE) +
+   labs(y = expression(paste("Seedling emergence per m"^"2"))) +
+   geom_richtext(aes(x = 2.4, y = 390, label = lab_anova_seed),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.5, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+p.seed 
+
+t.anova_seed %>% select(-p_new) %>% kable(caption = "ANOVA seedling emergence")
+```
+
+
+## Figure 3b Chlorophyll
+```{r include=FALSE}
+#lme
+## including position
+m.chlo <- lme(chlorophyll ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.veg.growth)
+Anova(m.chlo) # --> without pos_y
+
+##without weight
+m.chlo_null <- lme(chlorophyll ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.veg.growth)
+plot(m.chlo_null)
+qqnorm(m.chlo_null, abline = c(0,1))
+
+##include weights
+m.chlo_weights <- lme(chlorophyll ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.veg.growth)
+plot(m.chlo_weights)
+qqnorm(m.chlo_weights, abline = c(0,1))
+
+##compare models
+anova(m.chlo_null, m.chlo_weights) # --> without weights
+
+#Anova
+Anova(m.chlo_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.chlo_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.veg.growth$chlorophyll, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_chlo <- create_anova_table(m.chlo_null)[[1]]
+lab_anova_chlo <- create_anova_table(m.chlo_null)[[2]]
+
+# plot
+p.chlo <- d.veg.growth %>% 
+ ggplot_resp_box(x = wheat_var, y = chlorophyll, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Chlorophyll content (SPAD value)") +
+   geom_richtext(aes(x = 2.5, y = 48.5, label = lab_anova_chlo),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.1, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.chlo
+t.anova_chlo %>% select(-p_new) %>% kable(caption = "ANOVA chlorophyll content")
+```
+
+## Figure 3c Height
+```{r include=FALSE}
+#lme
+## including position
+m.height <- lme(height_mean ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.veg.growth)
+Anova(m.height) # --> include pos_y
+
+##without weight
+m.height_null <- lme(height_mean ~ trt * wheat_var+ pos_y, 
+                   random = ~ 1 | strip,
+                   data = d.veg.growth)
+plot(m.height_null)
+qqnorm(m.height_null, abline = c(0,1))
+
+##include weights
+m.height_weights <- lme(height_mean ~ trt * wheat_var + pos_y, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.veg.growth)
+plot(m.height_weights)
+qqnorm(m.height_weights, abline = c(0,1))
+
+##compare models
+anova(m.height_null, m.height_weights) # --> include weights
+
+#Anova
+Anova(m.height_weights) # --> without pos_y
+
+##without pos_y
+m.height_weights <- lme(height_mean ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.veg.growth)
+plot(m.height_weights)
+qqnorm(m.height_weights, abline = c(0,1))
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.height_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.veg.growth$height_mean, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_height <- create_anova_table(m.height_weights)[[1]]
+lab_anova_height <- create_anova_table(m.height_weights)[[2]]
+
+# plot
+p.height <- d.veg.growth %>% 
+ ggplot_resp_box(x = wheat_var, y = height_mean, fill = trt, t.emmeans = TRUE) +
+  labs(y = "Height (cm)") +
+  geom_richtext(aes(x = 0.5, y = 101, label = lab_anova_height),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.1, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.height
+
+t.anova_height %>% select(-p_new) %>% kable(caption = "ANOVA height")
+```
+
+## Figure 3d BM Vegetative
+```{r include=FALSE}
+#lme
+## including position
+m.dw1 <- lme(dry_weight ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.veg.growth)
+Anova(m.dw1) # --> without pos_y
+
+##without weight
+m.dw1_null <- lme(dry_weight ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.veg.growth)
+plot(m.dw1_null)
+qqnorm(m.dw1_null, abline = c(0,1))
+
+##include weights
+m.dw1_weights <- lme(dry_weight ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.veg.growth)
+plot(m.dw1_weights)
+qqnorm(m.dw1_weights, abline = c(0,1))
+
+##compare models
+anova(m.dw1_null, m.dw1_weights) # --> without weights
+
+#Anova
+Anova(m.dw1_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.dw1_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.veg.growth$dry_weight, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_bm1 <- create_anova_table(m.dw1_null)[[1]]
+lab_anova_bm1 <- create_anova_table(m.dw1_null)[[2]]
+
+# plot
+p.bm1 <- d.veg.growth %>% 
+ ggplot_resp_box(x = wheat_var, y = dry_weight, fill = trt, t.emmeans = FALSE) +
+   labs(y = expression(paste("Dry weight (g/m"^"2", ")"))) +
+   scale_y_continuous(expand = expansion(mult = c(0.1, 0.1))) +
+   geom_text(data = tab.emm, 
+                            aes(y = 1400, group = 0.5,
+                                label = if_else(p.value < 0.001, paste0("p < 0.001 "), 
+                                                paste0("p = ", 
+                                                       sprintf("%.3f", p.value))))) +
+   geom_richtext(aes(x = 2.4, y = 1320, label = lab_anova_bm1),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 2), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.bm1
+
+t.anova_bm1 %>% select(-p_new) %>% kable(caption = "ANOVA biomass per m^2^")
+```
+
+## Combine plots Fig. 3
+```{r echo=FALSE}
+fig.3 <- plot_grid(
+               p.seed + theme(legend.position="none", 
+                              axis.title.x = element_blank()),
+               p.chlo + theme(legend.position="none", 
+                              axis.title.x = element_blank()),
+               p.height + theme(legend.position="none",
+                                axis.title.x = element_blank()),
+               p.bm1 + theme(legend.position="none"),
+               labels=LETTERS[1:4],
+               align = "v",
+               nrow=4)
+
+# add legend
+legend <- get_legend(p.seed)
+fig.3 <- plot_grid(legend, fig.3, nrow = 2, rel_heights = c(.05, 1))
+
+# save
+ggsave(plot = fig.3, here("Figures", "Fig.3.svg"), 
+       width = 9, height =  30, units = "cm")
+```
+
+# Figure 4 Possible indirect effects
+## Figure 4a Weed
+```{r include=FALSE}
+d.weed <- read.csv(here("Data", "phen_weed.csv"),
+                    sep = ",", header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10"))
+ 
+
+d.weed %>% str()
+d.weed %>% summary()
+```
+
+```{r include=FALSE}
+#lme
+## including position
+m.weed <- lme(weed_cover ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.weed)
+Anova(m.weed) # --> include pos_y
+
+##with weight
+m.weed_null <- lme(weed_cover ~ trt * wheat_var + pos_y, 
+                   random = ~ 1 | strip,
+                   data = d.weed)
+plot(m.weed_null)
+qqnorm(m.weed_null, abline = c(0,1))
+
+##include weights
+m.weed_weights <- lme(weed_cover ~ trt * wheat_var + pos_y, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.weed)
+plot(m.weed_weights)
+qqnorm(m.weed_weights, abline = c(0,1))
+
+##compare models
+anova(m.weed_null, m.weed_weights) # --> without weights
+
+#Anova
+Anova(m.weed) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.weed, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.weed$weed_cover, na.rm = TRUE) * 1.05,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_bm1_weed <- create_anova_table(m.weed)[[1]]
+lab_anova_bm1_weed <- create_anova_table(m.weed)[[2]]
+
+# plot
+p.weed <- d.weed %>% 
+ ggplot_resp_box(x = wheat_var, y = weed_cover, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Weed cover %") +
+   scale_y_continuous(expand = expansion(mult = c(0.1, 0.15))) +
+   geom_richtext(aes(x = 0.5, y = 49, label = lab_anova_bm1_weed),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 2), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+p.weed
+
+t.anova_bm1_weed %>% select(-p_new) %>% kable(caption = "ANOVA weed")
+```
+
+
+## Fig 4b Oulema infestation
+```{r include=FALSE}
+d.insect <- read.csv(file = here("Data", "phen_oulema.csv"),
+                    sep = ",", header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10"))
+
+
+str(d.insect)
+summary(d.insect)
+```
+
+```{r include=FALSE}
+#lme
+## including position
+m.insect_ps <- lme(nr_lar_per_stem ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.insect)
+Anova(m.insect_ps) # --> without pos_y
+
+##without weight
+m.insect_ps_null <- lme(nr_lar_per_stem ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.insect)
+plot(m.insect_ps_null)
+qqnorm(m.insect_ps_null, abline = c(0,1))
+
+##include weights
+m.insect_ps_weights <- lme(nr_lar_per_stem ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.insect)
+plot(m.insect_ps_weights)
+qqnorm(m.insect_ps_weights, abline = c(0,1))
+
+##compare models
+anova(m.insect_ps_null, m.insect_ps_weights) # --> include weights
+
+#Anova
+Anova(m.insect_ps_weights) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.insect_ps_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.insect$nr_lar_per_stem, na.rm = TRUE) * 1.05,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_oulema <- create_anova_table(m.insect_ps_weights)[[1]]
+lab_anova_oulema <- create_anova_table(m.insect_ps_weights)[[2]]
+
+# plot
+p.oulema <- d.insect %>% 
+ ggplot_resp_box(x = wheat_var, y = nr_lar_per_stem, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Insect infestation per tiller") +
+  geom_richtext(aes(x = 0.5, y = 0.9, label = lab_anova_oulema),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.5, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1)))
+
+p.oulema
+
+t.anova_oulema %>% select(-p_new) %>% kable(caption = "ANOVA insect infestation")
+```
+
+## Fig 4c leaf area consumed
+```{r include=FALSE}
+# import data
+d.leaf_damage <- read.csv(here("Data", "phen_leaves_damage.csv"),
+                    sep = ",", header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10"))
+
+
+# check data
+d.leaf_damage %>% str()
+d.leaf_damage %>% summary()
+
+d.leaf_damage %>% 
+  group_by(wheat_var, trt) %>% 
+  summarise(
+    n = sum(!is.na(consumed_cm2))
+  )
+```
+
+```{r include=FALSE}
+#lme
+## including position
+m.da <- lme(consumed_cm2 ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.leaf_damage)
+Anova(m.da) # --> including pos_y
+
+##with weight
+m.da_null <- lme(consumed_cm2 ~ trt * wheat_var + pos_y, 
+                   random = ~ 1 | strip,
+                   data = d.leaf_damage)
+plot(m.da_null)
+qqnorm(m.da_null, abline = c(0,1))
+
+##include weights
+m.da_weights <- lme(consumed_cm2 ~ trt * wheat_var + pos_y, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.leaf_damage)
+plot(m.da_weights)
+qqnorm(m.da_weights, abline = c(0,1))
+
+##compare models
+anova(m.da_null, m.da_weights) # --> include weights
+
+#Anova
+Anova(m.da_weights) # --> exclude pos_y
+
+##include weights
+m.da_weights <- lme(consumed_cm2 ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.leaf_damage)
+plot(m.da_weights)
+qqnorm(m.da_weights, abline = c(0,1))
+
+#Anova
+Anova(m.da_weights) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.da_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.leaf_damage$consumed_cm2, na.rm = TRUE) * 1.05,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_damage <- create_anova_table(m.da_weights)[[1]]
+lab_anova_damage <- create_anova_table(m.da_weights)[[2]]
+
+# plot
+p.damage <- d.leaf_damage %>% 
+ ggplot_resp_box(x = wheat_var, y = consumed_cm2, fill = trt, t.emmeans = TRUE) +
+   labs(y = expression(paste("Area consumed (cm"^"2", "/leaf)"))) +
+  geom_richtext(aes(x = 0.5, y = 3.7, label = lab_anova_damage),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.5, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.1)))
+
+p.damage
+
+t.anova_damage %>% select(-p_new) %>% kable(caption = "ANOVA leaf damage")
+```
+
+## Combine plots Fig. 4
+```{r echo=FALSE, fig.width=11, fig.height=5}
+fig.4_ <- plot_grid(
+               p.weed + theme(legend.position="none"),   
+               p.oulema + theme(legend.position="none"),
+               p.damage + theme(legend.position="none"),
+               labels = LETTERS[1:3], align = "h", nrow=1, 
+               rel_widths = c(0.9, 1, 1))
+
+# add legend
+legend <- get_legend(p.oulema + theme(legend.position = "right", 
+                                      legend.box.margin = margin(0, 0, 0, 12)))
+fig.4 <- plot_grid(fig.4_, legend, rel_widths = c(2, 0.38))
+
+# save
+ggsave(plot = fig.4, here("Figures", "Fig.4.svg"), 
+       width = 27, height =  9, units = "cm")
+```
+
+# Figure 5 Wheat harvest
+```{r include=FALSE}
+d.gen <- read.csv(here("Data", "phen_harvest_wheat.csv"),
+                    sep = ",", header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10"))
+
+
+d.gen %>% str()
+d.gen %>% summary()
+```
+
+
+## Figure 5a Number of reproductive tillers m^2^
+```{r include=FALSE}
+#lme
+## including position
+m.num_h1 <- lme(num_heads ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.gen)
+Anova(m.num_h1) # --> without pos_y
+
+##without weight
+m.num_h1_null <- lme(num_heads ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.gen)
+plot(m.num_h1_null)
+qqnorm(m.num_h1_null, abline = c(0,1))
+
+##include weights
+m.num_h1_weights <- lme(num_heads ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.gen)
+plot(m.num_h1_weights)
+qqnorm(m.num_h1_weights, abline = c(0,1))
+
+##compare models
+anova(m.num_h1_null, m.num_h1_weights) # --> include weights
+
+#Anova
+Anova(m.num_h1_weights) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.num_h1_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.gen$num_heads, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_bm2_h <- create_anova_table(m.num_h1_weights)[[1]]
+lab_anova_bm2_h <- create_anova_table(m.num_h1_weights)[[2]]
+
+# plot
+p.num_head <-  d.gen %>% 
+ ggplot_resp_box(x = wheat_var, y = num_heads, fill = trt, t.emmeans = TRUE) +
+   labs(y = expression(paste("Tiller density (tillers/m"^"2", ")"))) +
+   geom_richtext(aes(x = 0.5, y = 810, label = lab_anova_bm2_h),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.num_head
+
+t.anova_bm2_h %>% select(-p_new) %>% kable(caption = "ANOVA number of reproductive tillers per m^2^")
+
+```
+
+## Figure 5b Number of reproductive tillers per plant
+```{r include=FALSE}
+#lme
+## including position
+m.rep <- lme(rep_til_mean ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.gen)
+Anova(m.rep) # --> without pos_y
+
+##without weight
+m.rep_null <- lme(rep_til_mean ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.gen)
+plot(m.rep_null)
+qqnorm(m.rep_null, abline = c(0,1))
+
+##include weights
+m.rep_weights <- lme(rep_til_mean ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.gen)
+plot(m.rep_weights)
+qqnorm(m.rep_weights, abline = c(0,1))
+
+##compare models
+anova(m.rep_null, m.rep_weights) # --> include weights
+
+#Anova
+Anova(m.rep_weights) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.rep_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.gen$rep_til_mean, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_rep <- create_anova_table(m.rep_weights)[[1]]
+lab_anova_rep <- create_anova_table(m.rep_weights)[[2]]
+
+# plot
+p.rep_til <- d.gen %>% 
+ ggplot_resp_box(x = wheat_var, y = rep_til_mean, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Reproductive tillers per plant") +
+   geom_richtext(aes(x = 0.5, y = 5.7, label = lab_anova_rep),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) 
+
+p.rep_til
+
+t.anova_rep %>% select(-p_new) %>% kable(caption = "ANOVA tillers per plant")
+```
+
+
+## Figure 5c BM generative m^2^
+```{r include=FALSE}
+d.gen_red <- d.gen %>% 
+  as_tibble() %>% 
+  drop_na(dry_weight)
+
+#lme
+## including position
+m.dw2 <- lme(dry_weight ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.gen_red)
+Anova(m.dw2) # --> include pos_y
+
+##with weight
+m.dw2_null <- lme(dry_weight ~ trt * wheat_var + pos_y, 
+                   random = ~ 1 | strip,
+                   data = d.gen_red)
+plot(m.dw2_null)
+qqnorm(m.dw2_null, abline = c(0,1))
+
+##include weights
+m.dw2_weights <- lme(dry_weight ~ trt * wheat_var + pos_y, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.gen_red)
+plot(m.dw2_weights)
+qqnorm(m.dw2_weights, abline = c(0,1))
+
+##compare models
+anova(m.dw2_null, m.dw2_weights) # --> include weights
+
+#Anova
+Anova(m.dw2_weights) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.dw2_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.gen_red$dry_weight, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_bm2 <- create_anova_table(m.dw2_weights)[[1]]
+lab_anova_bm2 <- create_anova_table(m.dw2_weights)[[2]]
+
+# plot
+p.bm2 <- d.gen_red %>% 
+ ggplot_resp_box(x = wheat_var, y = dry_weight, fill = trt, t.emmeans = TRUE) +
+   labs(y = expression(paste("Dry weight (g/m"^"2", ")"))) +
+   geom_richtext(aes(x = 0.5, y = 2600, label = lab_anova_bm2),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.bm2
+
+
+t.anova_bm2 %>% select(-p_new) %>% kable(caption = "ANOVA biomass per m^2^ harvest")
+```
+
+## Figure 5d BM generative per tiller
+```{r include=FALSE}
+d.gen_red <- d.gen %>% 
+  as_tibble() %>% 
+  drop_na(dw_per_stem)
+
+#lme
+## including position
+m.dw2_stem <- lme(dw_per_stem ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.gen_red)
+Anova(m.dw2_stem) # --> include pos_y
+
+##with weight
+m.dw2_stem_null <- lme(dw_per_stem ~ trt * wheat_var + pos_y, 
+                   random = ~ 1 | strip,
+                   data = d.gen_red)
+plot(m.dw2_stem_null)
+qqnorm(m.dw2_stem_null, abline = c(0,1))
+
+##include weights
+m.dw2_stem_weights <- lme(dw_per_stem ~ trt * wheat_var + pos_y, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.gen_red)
+plot(m.dw2_stem_weights)
+qqnorm(m.dw2_stem_weights, abline = c(0,1))
+
+##compare models
+anova(m.dw2_stem_null, m.dw2_stem_weights) # --> without weights
+
+#Anova
+Anova(m.dw2_stem_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.dw2_stem_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.gen_red$dw_per_stem, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_bm2_s <- create_anova_table(m.dw2_stem_null)[[1]]
+lab_anova_bm2_s <- create_anova_table(m.dw2_stem_null)[[2]]
+
+# plot
+p.bm_ps <- d.gen %>% 
+ ggplot_resp_box(x = wheat_var, y = dw_per_stem, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Dry weight per tiller (g)") +
+   scale_y_continuous(expand = expansion(mult = c(0.12, 0.1))) +
+   geom_richtext(aes(x = 0.5, y = 2.73, label = lab_anova_bm2_s),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.1, 2), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.bm_ps
+
+t.anova_bm2_s %>% select(-p_new) %>% kable(caption = "ANOVA biomass per tiller")
+```
+
+## Combine plots Fig. 5
+```{r echo=FALSE, warning=FALSE, fig.width=15, fig.height=5}
+
+fig.5_ <- plot_grid(
+               p.num_head + theme(legend.position="none"),
+               p.rep_til + theme(legend.position="none"),
+               p.bm2 + theme(legend.position="none"),
+               p.bm_ps + theme(legend.position="none"),
+               labels = LETTERS[1:4],
+               align = "v",
+               nrow = 1)
+
+# add legend
+legend <- get_legend(p.num_head + theme(legend.position = "right"))
+fig.5 <- plot_grid(fig.5_, legend, rel_widths = c(1, 0.08))
+
+# save
+ggsave(plot = fig.5, here("Figures", "Fig.5.svg"), 
+       width = 38, height =  9, units = "cm")
+```
+
+# Figure 6 Wheat yield and kernel attributes
+## Figure 6 Wheat yield
+```{r include=FALSE}
+d.har <- read.csv(here("Data", "phen_kernel_wheat.csv"),
+                    sep = ",", header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10"))
+
+
+d.har %>% str()
+d.har %>% summary()
+```
+
+
+### Figure 6a Yield
+```{r include=FALSE}
+#lme
+## including position
+m.yield <- lme(weight ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har)
+Anova(m.yield) # --> include pos_y
+
+##without weight
+m.yield_null <- lme(weight ~ trt * wheat_var + pos_y, 
+                   random = ~ 1 | strip,
+                   data = d.har)
+plot(m.yield_null)
+qqnorm(m.yield_null, abline = c(0,1))
+
+##include weights
+m.yield_weights <- lme(weight ~ trt * wheat_var + pos_y, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har)
+plot(m.yield_weights)
+qqnorm(m.yield_weights, abline = c(0,1))
+
+##compare models
+anova(m.yield_null, m.yield_weights) # --> without weights
+
+#Anova
+Anova(m.yield_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.yield_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har$weight, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_yield <- create_anova_table(m.yield_null)[[1]]
+lab_anova_yield <- create_anova_table(m.yield_null)[[2]]
+
+# plot
+p.yield <- d.har %>% 
+ ggplot_resp_box(x = wheat_var, y = weight, fill = trt, t.emmeans = TRUE) +
+   labs(y = expression(paste("Kernel yield (g/m"^"2", ")"))) +
+   scale_y_continuous(expand = expansion(mult = c(0.45, 0.1))) +
+   geom_richtext(aes(x = 1.5, y = 648, label = lab_anova_yield),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.01, 2), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.yield
+
+t.anova_yield %>% select(-p_new) %>% kable(caption = "ANOVA yield")
+```
+
+
+```{r include=FALSE}
+# biomass effect (in %)
+t.yield <- d.har %>% 
+  group_by(wheat_var, trt)%>% 
+  summarise(
+    Mean_DW = mean(weight, na.rm = T),
+    Median_DW = median(weight, na.rm = T),
+    sd = sd(weight, na.rm = T), 
+    n = sum(!is.na(weight)),
+    se = sd / sqrt(n)) %>% 
+  ungroup()
+
+# calculate yield increase claro
+1-t.yield[2, 3]/t.yield[1, 3]
+#t.yield[1, 3]/t.yield[2, 3]
+
+# calculate yield increase fiorina
+1-t.yield[4, 3]/t.yield[3, 3]
+#t.yield[3, 3]/t.yield[4, 3]
+
+# g per m^2 to dt/ha (dt = 100kg; x 0.1)
+d.har %>% 
+  group_by(wheat_var)%>% 
+  summarise(
+    Mean_DW = mean(weight, na.rm = T),
+    Median_DW = median(weight, na.rm = T),
+    sd = sd(weight, na.rm = T), 
+    n = sum(!is.na(weight)),
+    se = sd / sqrt(n)) %>% 
+  ungroup() %>% 
+  mutate(DW_dt_ha = Mean_DW * 0.1)
+
+# the yield is similar to other top varieties in variety trials by Agroscope
+
+```
+
+## Figure 6 Kernel quality
+```{r eval=FALSE, include=FALSE}
+# look at  mean values per wheat variety
+d.har %>%
+  select(-pos_y) %>% 
+  group_by(wheat_var) %>%
+  summarise(across(where(is.numeric), ~ mean(., na.rm = TRUE))) %>%
+  column_to_rownames("wheat_var") %>% 
+  t()
+
+# Are the qualities ok (index from 1-10 by Agroscope): 
+# water_absorption: claro: 8; fiorina: 7
+# dough_stability: claro: 6; fiorina: 6
+# dough_softening: claro: 6; fiorina: 6
+# falling_number (index 1-5): claro: 5; fiorina: 5
+# zeleny: claro: 7; fiorina: 4
+# protein: claro: 5; fiorina: 5
+# vol_weigh: claro: good; fiorina: good
+
+```
+
+### Figure 6b Thousand kernel weight
+```{r include=FALSE}
+#lme
+## including position
+m.agro1 <- lme(tkw ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har)
+Anova(m.agro1) # --> without pos_y
+
+##without weight
+m.agro1_null <- lme(tkw ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.har)
+plot(m.agro1_null)
+qqnorm(m.agro1_null, abline = c(0,1))
+
+##include weights
+m.agro1_weights <- lme(tkw ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har)
+plot(m.agro1_weights)
+qqnorm(m.agro1_weights, abline = c(0,1))
+
+##compare models
+anova(m.agro1_null, m.agro1_weights) # --> without weights
+
+#Anova
+Anova(m.agro1_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.agro1_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har$tkw, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_agro1 <- create_anova_table(m.agro1_null)[[1]]
+lab_anova_agro1 <- create_anova_table(m.agro1_null)[[2]]
+
+# plot
+p.tkw <- d.har %>% 
+ ggplot_resp_box(x = wheat_var, y = tkw, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Thousand kernel weight (g)") +
+   geom_richtext(aes(x = 1.5, y = 41, label = lab_anova_agro1),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.3, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+   scale_y_continuous(expand = expansion(mult = c(0.4, 0.1)))
+
+p.tkw
+
+t.anova_agro1 %>% select(-p_new) %>% kable(caption = "ANOVA tkw index")
+
+```
+
+### Figure 6c Protein
+```{r include=FALSE}
+#lme
+## including position
+m.agro2 <- lme(protein ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har)
+Anova(m.agro2) # --> without pos_y
+
+##without weight
+m.agro2_null <- lme(protein ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.har)
+plot(m.agro2_null)
+qqnorm(m.agro2_null, abline = c(0,1))
+
+##include weights
+m.agro2_weights <- lme(protein ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har)
+plot(m.agro2_weights)
+qqnorm(m.agro2_weights, abline = c(0,1))
+
+##compare models
+anova(m.agro2_null, m.agro2_weights) # --> without weights
+
+#Anova
+Anova(m.agro2_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.agro2_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har$protein, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_agro2 <- create_anova_table(m.agro2_null)[[1]]
+lab_anova_agro2 <- create_anova_table(m.agro2_null)[[2]]
+
+# plot
+p.protein <- d.har %>% 
+ ggplot_resp_box(x = wheat_var, y = protein, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Protein content (%)") +
+   geom_richtext(aes(x = 1.5, y = 10.8, label = lab_anova_agro2),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.1, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+   scale_y_continuous(expand = expansion(mult = c(0.55, 0.1))) 
+
+p.protein
+
+t.anova_agro2 %>% select(-p_new) %>% kable(caption = "ANOVA protein content")
+
+```
+
+### Figure 6d Zeleny
+```{r include=FALSE}
+#lme
+## including position
+m.agro3 <- lme(zeleny ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har)
+Anova(m.agro3) # --> without pos_y
+
+##without weight
+m.agro3_null <- lme(zeleny ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.har)
+plot(m.agro3_null)
+qqnorm(m.agro3_null, abline = c(0,1))
+
+##include weights
+m.agro3_weights <- lme(zeleny ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har)
+plot(m.agro3_weights)
+qqnorm(m.agro3_weights, abline = c(0,1))
+
+##compare models
+anova(m.agro3_null, m.agro3_weights) # --> include weights
+
+#Anova
+Anova(m.agro3_weights) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.agro3_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har$zeleny, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_agro3 <- create_anova_table(m.agro3_weights)[[1]]
+lab_anova_agro3 <- create_anova_table(m.agro3_weights)[[2]]
+
+# plot
+p.zeleny <- d.har %>% 
+ ggplot_resp_box(x = wheat_var, y = zeleny, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Zeleny (mL)") +
+   geom_richtext(aes(x = 1.5, y = 65, label = lab_anova_agro3),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.3, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.zeleny
+
+t.anova_agro3 %>% select(-p_new) %>% kable(caption = "ANOVA zeleny index")
+```
+
+### Figure 6e Dough stability
+```{r include=FALSE}
+#lme
+## including position
+m.agro4 <- lme(dough_stability ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har)
+Anova(m.agro4) # --> without pos_y
+
+##without weight
+m.agro4_null <- lme(dough_stability ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.har)
+plot(m.agro4_null)
+qqnorm(m.agro4_null, abline = c(0,1))
+
+##include weights
+m.agro4_weights <- lme(dough_stability ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har)
+plot(m.agro4_weights)
+qqnorm(m.agro4_weights, abline = c(0,1))
+
+##compare models
+anova(m.agro4_null, m.agro4_weights) # --> without weights
+
+#Anova
+Anova(m.agro4_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.agro4_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har$dough_stability, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE}
+# tidy anova table
+t.anova_agro4 <- create_anova_table(m.agro4_null)[[1]]
+lab_anova_agro4 <- create_anova_table(m.agro4_null)[[2]]
+
+# plot
+p.dough_stab <- d.har %>% 
+ ggplot_resp_box(x = wheat_var, y = dough_stability, fill = trt, t.emmeans = FALSE) +
+   labs(y = "Dough stability (min)") +
+   geom_richtext(aes(x = 1.5, y = 10, label = lab_anova_agro4),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.3, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+   geom_text(data = tab.emm,
+             aes(y = 11, group = 0.5,
+                 label = if_else(p.value < 0.001, paste0("p < 0.001 "), 
+                                 paste0("p = ", sprintf("%.3f", p.value))))) 
+
+p.dough_stab
+
+t.anova_agro4 %>% select(-p_new) %>% kable(caption = "ANOVA dough stability index")
+```
+
+
+## Figure 6 trace elements
+```{r include=FALSE}
+d.kern_ele_ <- read_delim(here("Data", "phen_kernel_giub.csv"),
+                          delim = ",", col_names = TRUE) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10")) %>% 
+  as.data.frame()
+
+d.kern_ele <- d.kern_ele_[d.kern_ele_$sample_id != "bx06", ] # remove outlier
+d.kern_ele %>% str()
+d.kern_ele %>% summary()
+
+```
+
+### Figure 6f PCA trace elements
+```{r include=FALSE}
+# set row names
+rownames(d.kern_ele) <- d.kern_ele$sample_id
+
+# complete missing values
+nPCs <- estim_ncpPCA(d.kern_ele[, c(6:26)], ncp.min = 0, ncp.max = 5) 
+d.kern_ele_completed <- imputePCA(d.kern_ele[, c(6:26)], ncp = nPCs$ncp, scale = TRUE)
+d.kern_ele_completed <- d.kern_ele_completed$completeObs %>% as.data.frame()
+d.ele_pca <- bind_cols(d.kern_ele[, c(1:5)], d.kern_ele_completed)
+
+# perform PCA
+tibble(col_names = colnames(d.ele_pca), 
+       col_num = c(1:length(colnames(d.ele_pca)))) %>%
+  print(n = Inf)
+
+d.pca.FR <- d.ele_pca[, c(4, 5, 6:26)] %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")))
+
+cond.pca.FR <- PCA(d.pca.FR[, -1],
+                   ncp = 5,
+                   scale.unit = TRUE,
+                   quali.sup = c(1),
+                   graph = FALSE)
+
+# check PCA
+summary(cond.pca.FR)
+
+# extract axis 
+d.ext <- cond.pca.FR$ind$coord %>% as_tibble(rownames = "sample_id")
+
+d.ele_pca_dim <- left_join(d.kern_ele[, c(1:5)], d.ext)
+```
+
+```{r echo=FALSE, warning=FALSE}
+p.ele_ <- d.ele_pca_dim %>% 
+  ggplot(aes(x = Dim.1, y = Dim.2, color = trt, shape = wheat_var)) +
+   geom_hline(yintercept = 0, linetype = 2) +
+   geom_vline(xintercept = 0, linetype = 2) +
+   geom_point(size = 2.5, alpha = 0.9) +
+   scale_color_manual(name = "Cond.", 
+                      labels = c(W = "WT", b = expression(italic(bx[1]))), 
+                      values = c(W = "gold2", b = "darkgreen")) +
+   scale_shape_manual(name = "Var.", 
+                      labels = c(claro = "Claro", fiorina = "Fiorina"),
+                      values = c(claro = 16, fiorina = 17))+
+   xlab(paste0("PC1 (", round(cond.pca.FR$eig[1,2], 1) ," %)")) +
+   ylab(paste0("PC1 (", round(cond.pca.FR$eig[2,2], 1) ," %)")) +
+   theme(legend.position = "top") 
+   
+p.ele_
+
+d.pc <- cond.pca.FR$var$coord %>% as_tibble(rownames = "parameter")
+
+mult <- min(
+        (max(d.ele_pca_dim[,"Dim.2"]) - min(d.ele_pca_dim[, "Dim.2"])/
+           (max(d.pc[, "Dim.2"])-min(d.pc[, "Dim.2"]))),
+        (max(d.ele_pca_dim[, "Dim.1"]) - min(d.ele_pca_dim[, "Dim.1"])/(max(d.pc[, "Dim.1"])-min(d.pc[, "Dim.1"]))))
+
+# check which parameters contribute most to PC1 and PC2 and select top 5
+top_10 <- cond.pca.FR$var$contrib %>% 
+  as_tibble(rownames = "variable") %>%
+  mutate(sum_dim1_dim2 = (Dim.1 * cond.pca.FR$eig[1,2])/100 + 
+           (Dim.2 * cond.pca.FR$eig[2,2])/100) %>% 
+  arrange(desc(sum_dim1_dim2)) %>% 
+  top_n(10) %>% pull(variable)
+
+d.pc_red <- d.pc %>% 
+  mutate(v1 = .7 * mult * Dim.1,
+         v2 = .7 * mult * Dim.2) %>% 
+  filter(parameter %in% top_10) %>% 
+  mutate(parameter = str_replace(parameter, "mg/kg", ""),
+         parameter = str_replace(parameter, "56", ""),
+         parameter = str_replace(parameter, "[\\[mg/kg]\\]", ""))
+
+p.ele <- p.ele_  + 
+  # coord_equal() +
+  geom_text(data = d.pc_red, aes(x = v1, y = v2, label = parameter,
+                                 color = NULL, shape = NULL), 
+            size = 4, hjust = -0.1, color="gray27") +
+  geom_segment(data = d.pc_red, 
+               aes(x = 0, y = 0, xend = v1, yend = v2, color = NULL, 
+                   shape = NULL), 
+               arrow = arrow(length=unit(0.2, "cm")), alpha = 0.75, 
+               color = "gray32")
+
+p.ele
+```
+
+
+## Combine plots fig 6
+```{r fig.width=6, fig.height=10, echo=FALSE, warning=FALSE}
+fig.6 <- plot_grid(
+               p.yield + theme(legend.position="none", axis.title.x = element_blank()),
+               p.tkw + theme(legend.position="none", axis.title.x = element_blank()),
+               p.protein + theme(legend.position="none") + xlab(""),
+               p.zeleny + theme(legend.position="none"),
+               p.dough_stab + theme(legend.position="none"),
+               p.ele + theme(legend.position="none"),
+               labels = LETTERS[1:6],
+               align = "v",
+               nrow = 3,
+               rel_heights = c(1, 1.09, 1.09))
+
+# add legend
+legend <- get_legend(p.yield)
+fig.6 <- plot_grid(legend, fig.6, nrow = 2, rel_heights = c(.05, 1))
+
+# save
+ggsave(plot = fig.6, here("Figures", "Fig.6.svg"), 
+       width = 15, height =  22, units = "cm")
+```
+
+# Figure S1
+## Field map
+```{r fig.width=10, fig.height=10, echo=FALSE, warning=FALSE}
+d.map_ <- read.csv(here("Data", "phen_veg_growth.csv"),sep = ",", header = T)
+
+d.map <- d.map_ %>% 
+     mutate(trt = factor(trt, levels = c("W", "b")),
+            sample_id_red = str_sub(sample_id, end = - 3),
+            pos_x = case_when(
+           sample_id_red == "bx01" ~ 3,
+           sample_id_red == "bx02" ~ 3,
+           sample_id_red == "bx03" ~ 3,
+           sample_id_red == "bx04" ~ 3,
+           sample_id_red == "bx05" ~ 3,
+           sample_id_red == "bx06" ~ 4,
+           sample_id_red == "bx07" ~ 4,
+           sample_id_red == "bx08" ~ 4,
+           sample_id_red == "bx09" ~ 4,
+           sample_id_red == "bx10" ~ 4,
+           sample_id_red == "bx11" ~ 5,
+           sample_id_red == "bx12" ~ 5,
+           sample_id_red == "bx13" ~ 5,
+           sample_id_red == "bx14" ~ 5,
+           sample_id_red == "bx15" ~ 5,
+           sample_id_red == "bx16" ~ 6,
+           sample_id_red == "bx17" ~ 6,
+           sample_id_red == "bx18" ~ 6,
+           sample_id_red == "bx19" ~ 6,
+           sample_id_red == "bx20" ~ 6,
+           sample_id_red == "bx21" ~ 1,
+           sample_id_red == "bx22" ~ 1,
+           sample_id_red == "bx23" ~ 1,
+           sample_id_red == "bx24" ~ 1,
+           sample_id_red == "bx25" ~ 1,
+           sample_id_red == "bx26" ~ 2,
+           sample_id_red == "bx27" ~ 2,
+           sample_id_red == "bx28" ~ 2,
+           sample_id_red == "bx29" ~ 2,
+           sample_id_red == "bx30" ~ 2,
+           sample_id_red == "WT01" ~ 3,
+           sample_id_red == "WT02" ~ 3,
+           sample_id_red == "WT03" ~ 3,
+           sample_id_red == "WT04" ~ 3,
+           sample_id_red == "WT05" ~ 3,
+           sample_id_red == "WT06" ~ 4,
+           sample_id_red == "WT07" ~ 4,
+           sample_id_red == "WT08" ~ 4,
+           sample_id_red == "WT09" ~ 4,
+           sample_id_red == "WT10" ~ 4,
+           sample_id_red == "WT11" ~ 5,
+           sample_id_red == "WT12" ~ 5,
+           sample_id_red == "WT13" ~ 5,
+           sample_id_red == "WT14" ~ 5,
+           sample_id_red == "WT15" ~ 5,
+           sample_id_red == "WT16" ~ 6,
+           sample_id_red == "WT17" ~ 6,
+           sample_id_red == "WT18" ~ 6,
+           sample_id_red == "WT19" ~ 6,
+           sample_id_red == "WT20" ~ 6,
+           sample_id_red == "WT21" ~ 1,
+           sample_id_red == "WT22" ~ 1,
+           sample_id_red == "WT23" ~ 1,
+           sample_id_red == "WT24" ~ 1,
+           sample_id_red == "WT25" ~ 1,
+           sample_id_red == "WT26" ~ 2,
+           sample_id_red == "WT27" ~ 2,
+           sample_id_red == "WT28" ~ 2,
+           sample_id_red == "WT29" ~ 2,
+           sample_id_red == "WT30" ~ 2
+           ))
+
+d.map_lab <- d.map %>% 
+  group_by(trt, sample_id_red) %>% 
+  summarise(pos_x = mean(pos_x),
+            pos_y= mean(pos_y),
+            .groups = "drop") %>% 
+  ungroup()
+
+d.map_lab %>% 
+  filter(trt %in% c("b", "W")) %>% 
+  ggplot(aes(pos_x, pos_y, fill = trt, color = trt)) +
+  geom_point(shape = 22, size = 20, alpha = 0.6) +
+  scale_fill_manual(name = "Soil conditioning", 
+                    labels = c(W = "WT", b = expression(italic(bx[1]))), 
+                    values = c(W = "gold2", b = "darkgreen")) +
+  scale_color_manual(name = "Soil conditioning", 
+                    labels = c(W = "WT", b = expression(italic(bx[1]))), 
+                    values = c(W = "gold2", b = "darkgreen")) +
+  geom_text(aes(label = sample_id_red), hjust = 0.5, 
+            vjust = 0.5, show.legend = FALSE, color = "grey32") +
+  scale_y_continuous(lim = c(0, 90), expand = expansion(mult = c(0.01, 0.01)),
+                     breaks = c(0, 15, 30, 45, 60, 75, 90)) +
+  scale_x_continuous(lim = c(0, 7), expand = expansion(mult = c(0, 0)),
+                     breaks = c(1:6)) +
+  theme_classic()
+
+ggsave(here("Figures", "Fig.S1.svg"), 
+       width = 16, height =  17.5, units = "cm")
+```
+
+# Figure S2
+## Figure S2a shoot dry weight conditioning phase
+```{r include=FALSE}
+d.cond <- read.csv(here("Data", "phen_cond_maize.csv"),sep = ",", 
+                   header = T) %>%
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y %in% c( 3.00,  5.25)  ~ "strip_01",
+           pos_y %in% c(12.00, 14.25)  ~ "strip_02",
+           pos_y %in% c(21.00, 23.25)  ~ "strip_03",
+           pos_y %in% c(30.00, 32.25)  ~ "strip_04",
+           pos_y %in% c(39.00, 41.25)  ~ "strip_05",
+           pos_y %in% c(48.00, 50.25)  ~ "strip_06",
+           pos_y %in% c(57.00, 59.25)  ~ "strip_07",
+           pos_y %in% c(66.00, 68.25)  ~ "strip_08",
+           pos_y %in% c(75.00, 77.25)  ~ "strip_09",
+           pos_y %in% c(84.00, 86.25)  ~ "strip_10")) 
+
+d.cond %>% str() 
+d.cond %>% summary() 
+
+```
+
+```{r include=FALSE}
+#lme
+## including position
+m.cond.weight <- lme(dw_cond ~ trt + pos_y, 
+              random = ~ 1 | strip,
+              data = d.cond)
+Anova(m.cond.weight) # --> without pos_y
+
+##with weight
+m.cond.weight_null <- lme(dw_cond ~ trt + pos_y, 
+                   random = ~ 1 | strip,
+                   data = d.cond)
+plot(m.cond.weight_null)
+qqnorm(m.cond.weight_null, abline = c(0,1))
+
+##include weights
+m.cond.weight_weights <- lme(dw_cond ~ trt + pos_y, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 | trt),
+                      data = d.cond)
+plot(m.cond.weight_weights)
+qqnorm(m.cond.weight_weights, abline = c(0,1))
+
+##compare models
+anova(m.cond.weight_null, m.cond.weight_weights) # --> without weights
+
+#Anova
+Anova(m.cond.weight_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.cond.weight_null, specs = pairwise ~ trt) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.cond$dw_cond , na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova <- Anova(m.cond.weight_null) %>% 
+  rownames_to_column(var = "Variable") %>%
+  tibble()%>%
+  mutate(Variable = str_replace_all(Variable, "trt", "Gen:"),
+         Variable = str_replace_all(Variable, "pos_y", "Pos:"),
+         p_new = if_else(`Pr(>Chisq)` < 0.001, paste0("p < 0.001 "), 
+                         paste0("p = ", sprintf("%.3f", `Pr(>Chisq)`))),
+         across(where(is.numeric), ~ as.character(signif(., 2))),
+         across(everything(), ~ replace_na(., ""))) 
+
+# tidy anova table for plot
+lab_anova <- paste("**ANOVA**<Br>", 
+                   t.anova$Variable[1], " ", t.anova$p_new[1], "<Br>", 
+                   t.anova$Variable[2], " ", t.anova$p_new[2])
+
+
+p.cond <- d.cond %>%
+  ggplot(aes(x = trt, y = dw_cond, fill = trt)) +
+    geom_boxplot(outlier.colour = NA, alpha = 0.3, 
+                 color = "grey68", show.legend = FALSE) + 
+    geom_quasirandom(size = 1, shape = 1, width = 0.2, alpha = 0.6,
+                     color = "black", show.legend = FALSE) +
+    stat_summary(fun = mean, geom = "point",
+                 shape = 18, size = 3, 
+                 show.legend = FALSE) +
+    stat_summary(fun.data = mean_se, geom = "errorbar",
+                 size = 1, width = 0.25,
+                 show.legend = FALSE) +
+    scale_x_discrete(name = "Maize genotype", 
+                     labels = c(W = "WT", b = expression(italic(bx1)))) +
+    scale_fill_manual(values = c(W = "gold2", b = "darkgreen")) +
+    labs(y = "Dry weight (g)") +
+    # geom_text(data = tab.emm, 
+    #           aes(y = max.y, x = 1.5,
+    #               label = paste0("p = ", signif(p.value, 2))), size = 3) +
+    geom_richtext(aes(x = 0, y = Inf, label = lab_anova),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.5, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.cond
+
+t.anova %>% select(-p_new) %>% kable(caption = "ANOVA maize shoot dry weight")
+```
+
+## Figure S2b soil parameters
+```{r include=FALSE}
+d.soil_prm_long <- read.csv(here("Data", "soil_parameters.csv"), sep = ",",
+                        header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")))
+
+ 
+str(d.soil_prm_long)
+```
+
+```{r echo=FALSE, warning=FALSE}
+# test for differences between genotypes by Welch t-test and correct for multiple testing
+p_values_soil_par <- d.soil_prm_long %>% 
+  group_by(parameter) %>% 
+  nest() %>% 
+  mutate(fit = map(data, ~ t.test(quantity ~ trt, data = .)),
+         results = map(fit, broom::glance)) %>%
+  select(parameter, results) %>% 
+  unnest(cols = c(results), .names_repair = "minimal")%>% 
+  select(1, 7)%>%
+  ungroup() %>% 
+  mutate(
+    n      = length(.$p.value),
+    p.ad   = p.adjust(p.value, method = "fdr"),
+    p.ad_c = case_when(
+      p.ad < 0.001 ~ as.character("p < 0.001"),
+      TRUE  ~ paste0("p = ", sprintf("%.3f", p.ad))),
+    x      = 1.5,
+    y      = Inf)
+
+p.soil_par <- d.soil_prm_long %>% 
+  ggplot_soil_box(x = trt, y = quantity, fill = trt, facet = parameter) +
+    labs(y = "Quantity") + 
+    geom_text(
+      data    = p_values_soil_par,
+      mapping = aes(x = x, y = y, label = p.ad_c, fill = NULL),
+      vjust = 2,
+      size = 3)  +
+      scale_y_continuous(expand = expansion(mult = c(0.1, 0.25))) 
+
+p.soil_par
+
+```
+
+## Combine plots Fig.S2
+```{r fig.width=12, fig.height=8, echo=FALSE, warning=FALSE}
+fig.s2 <- plot_grid(
+               p.cond,
+               p.soil_par,
+               labels = LETTERS[1:2], axis = "b",
+               align = "h", nrow = 1, rel_widths = c(0.6, 2))
+
+# save
+ggsave(plot = fig.s2, here("Figures", "Fig.S2.svg"), 
+       width = 32, height =  18, units = "cm")
+```
+
+# Figure S3 Microbiome analysis
+See Script by Jan Waelchli and Klaus Schlaeppi (in microbiome analysis folder)
+
+# Figure S4 Microbiome analysis
+See Script by Jan Waelchli and Klaus Schlaeppi (in microbiome analysis folder)
+
+# Figure 3 – figure supplement 1
+```{r include=FALSE}
+d.veg.growth <- read.csv(here("Data", "phen_veg_growth.csv"),
+                    sep = ",", header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10"))
+
+d.veg.growth %>% str()
+d.veg.growth %>% summary()
+```
+
+
+## Figure 3 – figure supplement 1a Fresh biomass
+```{r include=FALSE}
+#lme
+## including position
+m.bm1 <- lme(fresh_weight ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.veg.growth)
+Anova(m.bm1) # --> without pos_y
+
+##without weight
+m.bm1_null <- lme(fresh_weight ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.veg.growth)
+plot(m.bm1_null)
+qqnorm(m.bm1_null, abline = c(0,1))
+
+##include weights
+m.bm1_weights <- lme(fresh_weight ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.veg.growth)
+plot(m.bm1_weights)
+qqnorm(m.bm1_weights, abline = c(0,1))
+
+##compare models
+anova(m.bm1_null, m.bm1_weights) # --> without weights
+
+#Anova
+Anova(m.bm1_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.bm1_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.veg.growth$fresh_weight, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_bm1_fresh <- create_anova_table(m.bm1_null)[[1]]
+lab_anova_bm1_fresh <- create_anova_table(m.bm1_null)[[2]]
+
+# plot
+p.fw <- d.veg.growth %>% 
+ ggplot_resp_box(x = wheat_var, y = fresh_weight, fill = trt, t.emmeans = TRUE) +
+   labs(y = expression(paste("Fresh weight (g/m"^"2", ")"))) +
+   scale_y_continuous(expand = expansion(mult = c(0.1, 0.1))) +
+   geom_richtext(aes(x = 2.3, y = 5840, label = lab_anova_bm1_fresh),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 2), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.fw
+t.anova_bm1_fresh %>% select(-p_new) %>% kable(caption = "ANOVA biomass per m^2^")
+```
+
+## Figure 3 – figure supplement 1b Water content
+```{r include=FALSE}
+#lme
+## including position
+m.bm_water <- lme(water_content ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.veg.growth)
+Anova(m.bm_water) # --> without pos_y
+
+##with weight
+m.bm_water_null <- lme(water_content ~ trt * wheat_var + pos_y, 
+                   random = ~ 1 | strip,
+                   data = d.veg.growth)
+plot(m.bm_water_null)
+qqnorm(m.bm_water_null, abline = c(0,1))
+
+##include weights
+m.bm_water_weights <- lme(water_content ~ trt * wheat_var + pos_y, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.veg.growth)
+plot(m.bm_water_weights)
+qqnorm(m.bm_water_weights, abline = c(0,1))
+
+##compare models
+anova(m.bm_water_null, m.bm_water_weights) # --> include weights
+
+#Anova
+Anova(m.bm_water_weights) # --> Without pos_y
+
+##include weights
+m.bm_water_weights <- lme(water_content ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.veg.growth)
+plot(m.bm_water_weights)
+qqnorm(m.bm_water_weights, abline = c(0,1))
+
+#Anova
+Anova(m.bm_water_weights) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.bm_water_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.veg.growth$water_content, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_bm1_water <- create_anova_table(m.bm_water_weights)[[1]]
+lab_anova_bm1_water <- create_anova_table(m.bm_water_weights)[[2]]
+
+# plot
+p.water <- d.veg.growth %>% 
+ ggplot_resp_box(x = wheat_var, y = water_content, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Water content %") +
+   scale_y_continuous(expand = expansion(mult = c(0.1, 0.1))) +
+   geom_richtext(aes(x = 2.4, y = 85, label = lab_anova_bm1_water),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 2), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+p.water
+
+t.anova_bm1_water %>% select(-p_new) %>% kable(caption = "ANOVA water content")
+```
+
+## Combine Figure 3 – figure supplement 1
+```{r echo=FALSE, warning=FALSE, fig.width=6}
+fig.S5_ <- plot_grid(
+               p.fw + theme(legend.position="none"),
+               p.water + theme(legend.position="none"),
+               labels = LETTERS[1:2],
+               align = "h",
+               nrow = 1, 
+               rel_widths = c(1, 1))
+
+# add legend
+legend <- get_legend(p.water + theme(legend.position = "right"))
+fig.S5 <- plot_grid(fig.S5_, legend, nrow = 1, rel_widths = c(0.75, 0.12))
+
+# save
+ggsave(plot = fig.S5, here("Figures", "Fig.3_sup_1.svg"), 
+       width = 20.5, height =  9, units = "cm")
+
+```
+
+# Figure 4 – figure supplement 1
+```{r include=FALSE}
+d.phyt_wheat <- read.csv(here("Data", "phen_phytohor.csv"),
+                     sep = ",", header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10"))
+
+
+d.phyt_wheat %>% str()
+
+d.phyt_wheat %>%
+ ggplot_resp_box(x = wheat_var, y = concentration, 
+                 fill = trt, t.emmeans = FALSE) +
+    labs(y = "Concentration (ng/gFW)") +
+    facet_wrap(vars(hormone), nrow = 3, scales = "free")
+
+d.phyt_wheat %>% str()
+d.phyt_wheat %>% pull(hormone) %>% unique()
+
+d.phyt_wheat %>% 
+  group_by(hormone, wheat_var, trt) %>% 
+  summarise(
+    n = sum(!is.na(concentration))
+  ) %>% print(n = Inf)
+
+```
+
+```{r include=FALSE}
+# ABA
+d.phyt_red <- d.phyt_wheat %>% 
+  filter(hormone == "ABA") %>% 
+  as_tibble() %>% 
+  drop_na(concentration)
+
+#lme
+## including position
+m.phyt_red <- lme(concentration ~ trt * wheat_var + pos_y, 
+                  random = ~ 1 | strip,
+                  data = d.phyt_red)
+Anova(m.phyt_red) # --> without pos_y
+
+##without weight
+m.phyt_red_null <- lme(concentration ~ trt * wheat_var, 
+                       random = ~ 1 | strip,
+                       data = d.phyt_red)
+plot(m.phyt_red_null)
+qqnorm(m.phyt_red_null, abline = c(0,1))
+
+##include weights
+m.phyt_red_weights <- lme(concentration ~ trt * wheat_var, 
+                          random = ~ 1 | strip,
+                          weights = varIdent(form = ~ 1 |
+                                               trt * wheat_var),
+                          data = d.phyt_red)
+plot(m.phyt_red_weights)
+qqnorm(m.phyt_red_weights, abline = c(0,1))
+
+##compare models
+anova(m.phyt_red_null, m.phyt_red_weights) # --> include weights
+
+#Anova
+Anova(m.phyt_red_weights) 
+
+#Label for ANOVA table
+lab.aba <- create_anova_table(m.phyt_red_weights)[[2]]
+
+# post-hoc test for p-val
+tab.emm.ABA <- emmeans(m.phyt_red_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.phyt_red$concentration, na.rm = TRUE) * 1.15,
+            trt = NA,
+            hormone = paste(d.phyt_red$hormone[1])) %>% 
+  select(-c(lower.CL, upper.CL, t.ratio)) %>% print()
+
+
+# JA_Ile
+d.phyt_red <- d.phyt_wheat %>% 
+  filter(hormone == "JA_Ile") %>% 
+  as_tibble() %>% 
+  drop_na(concentration)
+
+#lme
+## including position
+m.phyt_red <- lme(concentration ~ trt * wheat_var + pos_y, 
+                  random = ~ 1 | strip,
+                  data = d.phyt_red)
+Anova(m.phyt_red) # --> without pos_y
+
+##without weight
+m.phyt_red_null <- lme(concentration ~ trt * wheat_var, 
+                       random = ~ 1 | strip,
+                       data = d.phyt_red)
+plot(m.phyt_red_null)
+qqnorm(m.phyt_red_null, abline = c(0,1))
+
+##include weights
+m.phyt_red_weights <- lme(concentration ~ trt * wheat_var, 
+                          random = ~ 1 | strip,
+                          weights = varIdent(form = ~ 1 |
+                                               trt * wheat_var),
+                          data = d.phyt_red)
+plot(m.phyt_red_weights)
+qqnorm(m.phyt_red_weights, abline = c(0,1))
+
+##compare models
+anova(m.phyt_red_null, m.phyt_red_weights) # --> include weights
+
+#Anova
+Anova(m.phyt_red_weights) 
+
+#Label for ANOVA table
+lab.ja_ile <- create_anova_table(m.phyt_red_weights)[[2]]
+
+# post-hoc test for p-val
+tab.emm.JA_Ile <- emmeans(m.phyt_red_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.phyt_red$concentration, na.rm = TRUE) * 1.15,
+            trt = NA,
+            hormone = paste(d.phyt_red$hormone[1])) %>% select(-c(lower.CL, upper.CL, t.ratio)) %>% print()
+
+# JA
+d.phyt_red <- d.phyt_wheat %>% 
+  filter(hormone == "JA") %>% 
+  as_tibble() %>% 
+  drop_na(concentration)
+
+#lme
+## including position
+m.phyt_red <- lme(concentration ~ trt * wheat_var + pos_y, 
+                  random = ~ 1 | strip,
+                  data = d.phyt_red)
+Anova(m.phyt_red) # --> without pos_y
+
+##without weight
+m.phyt_red_null <- lme(concentration ~ trt * wheat_var, 
+                       random = ~ 1 | strip,
+                       data = d.phyt_red)
+plot(m.phyt_red_null)
+qqnorm(m.phyt_red_null, abline = c(0,1))
+
+##include weights
+m.phyt_red_weights <- lme(concentration ~ trt * wheat_var, 
+                          random = ~ 1 | strip,
+                          weights = varIdent(form = ~ 1 |
+                                               trt * wheat_var),
+                          data = d.phyt_red)
+plot(m.phyt_red_weights)
+qqnorm(m.phyt_red_weights, abline = c(0,1))
+
+##compare models
+anova(m.phyt_red_null, m.phyt_red_weights) # --> include weights
+
+#Anova
+Anova(m.phyt_red_weights) 
+
+#Label for ANOVA table
+lab.ja <- create_anova_table(m.phyt_red_weights)[[2]]
+
+# post-hoc test for p-val
+tab.emm.JA <- emmeans(m.phyt_red_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.phyt_red$concentration, na.rm = TRUE) * 1.15,
+            trt = NA,
+            hormone = paste(d.phyt_red$hormone[1])) %>% select(-c(lower.CL, upper.CL, t.ratio)) %>% print()
+
+# OPDA
+d.phyt_red <- d.phyt_wheat %>% 
+  filter(hormone == "OPDA") %>% 
+  as_tibble() %>% 
+  drop_na(concentration)
+
+#lme
+## including position
+m.phyt_red <- lme(concentration ~ trt * wheat_var + pos_y, 
+                  random = ~ 1 | strip,
+                  data = d.phyt_red)
+Anova(m.phyt_red) # --> without pos_y
+
+##without weight
+m.phyt_red_null <- lme(concentration ~ trt * wheat_var, 
+                       random = ~ 1 | strip,
+                       data = d.phyt_red)
+plot(m.phyt_red_null)
+qqnorm(m.phyt_red_null, abline = c(0,1))
+
+##include weights
+m.phyt_red_weights <- lme(concentration ~ trt * wheat_var, 
+                          random = ~ 1 | strip,
+                          weights = varIdent(form = ~ 1 |
+                                               trt * wheat_var),
+                          data = d.phyt_red)
+plot(m.phyt_red_weights)
+qqnorm(m.phyt_red_weights, abline = c(0,1))
+
+##compare models
+anova(m.phyt_red_null, m.phyt_red_weights) # --> without weights
+
+#Anova
+Anova(m.phyt_red_null) 
+
+#Label for ANOVA table
+lab.opda <- create_anova_table(m.phyt_red_null)[[2]]
+
+# post-hoc test for p-val
+tab.emm.OPDA <- emmeans(m.phyt_red_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.phyt_red$concentration, na.rm = TRUE) * 1.15,
+            trt = NA,
+            hormone = paste(d.phyt_red$hormone[1])) %>% select(-c(lower.CL, upper.CL, t.ratio)) %>% print()
+
+# SA
+d.phyt_red <- d.phyt_wheat %>% 
+  filter(hormone == "SA") %>% 
+  as_tibble() %>% 
+  drop_na(concentration)
+
+#lme
+## including position
+m.phyt_red <- lme(concentration ~ trt * wheat_var + pos_y, 
+                  random = ~ 1 | strip,
+                  data = d.phyt_red)
+Anova(m.phyt_red) # --> without pos_y
+
+##without weight
+m.phyt_red_null <- lme(concentration ~ trt * wheat_var, 
+                       random = ~ 1 | strip,
+                       data = d.phyt_red)
+plot(m.phyt_red_null)
+qqnorm(m.phyt_red_null, abline = c(0,1))
+
+##include weights
+m.phyt_red_weights <- lme(concentration ~ trt * wheat_var, 
+                          random = ~ 1 | strip,
+                          weights = varIdent(form = ~ 1 |
+                                               trt * wheat_var),
+                          data = d.phyt_red)
+plot(m.phyt_red_weights)
+qqnorm(m.phyt_red_weights, abline = c(0,1))
+
+##compare models
+anova(m.phyt_red_null, m.phyt_red_weights) # --> include weights
+
+#Anova
+Anova(m.phyt_red_weights) 
+
+#Label for ANOVA table
+lab.sa <- create_anova_table(m.phyt_red_weights)[[2]]
+
+# post-hoc test for p-val
+tab.emm.SA <- emmeans(m.phyt_red_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.phyt_red$concentration, na.rm = TRUE) * 1.15,
+            trt = NA,
+            hormone = paste(d.phyt_red$hormone[1])) %>% select(-c(lower.CL, upper.CL, t.ratio)) %>% print()
+
+
+
+# combine all tab.emm
+tab.emm <- bind_rows(tab.emm.ABA, tab.emm.JA_Ile, tab.emm.JA, 
+                     tab.emm.OPDA, tab.emm.SA)
+```
+
+
+```{r fig.width=7, fig.height=8.3, echo=FALSE, warning=FALSE}
+
+add_anova_tab <- function(tab, x, y, horm,  ...) {
+  geom_richtext(data = data.frame(hormone = {{horm}}), 
+                mapping =  aes(x = {{x}}, y = {{y}}, label = {{tab}}),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+}
+
+d.phyt_wheat %>%
+ ggplot_resp_box(x = wheat_var, y = concentration, fill = trt, t.emmeans = TRUE) +
+  labs(y = "Concentration (ng/gFW)") +
+  facet_wrap(vars(hormone), nrow = 3, scales = "free") +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.12))) +
+  add_anova_tab(tab = lab.aba, x = 2.5, y = 37, horm = "ABA") +
+  add_anova_tab(tab = lab.ja_ile, x = 2.5, y = 2.2, horm = "JA_Ile") +
+  add_anova_tab(tab = lab.ja, x = 2.5, y = 4.1, horm = "JA") +
+  add_anova_tab(tab = lab.opda, x = 2.5, y = 5.6, horm = "OPDA") +
+  add_anova_tab(tab = lab.sa, x = 2.5, y = 300, horm = "SA")
+
+ggsave(here("Figures", "Fig.4_sup_1.svg"), 
+       width = 16, height =  20, units = "cm")
+
+```
+
+# Figure 6 – figure supplement 1
+## Figure 6 – figure supplement 1a Kernel number per tiller
+```{r include=FALSE}
+d.gen <- read.csv(here("Data", "phen_harvest_wheat.csv"),
+                    sep = ",", header = T) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10"))
+
+d.gen %>% str()
+d.gen %>% summary()
+```
+
+
+```{r include=FALSE}
+#lme
+## including position
+m.gra1 <- lme(nr_kernels_per_head ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.gen)
+Anova(m.gra1) # --> without pos_y
+
+##without weight
+m.gra1_null <- lme(nr_kernels_per_head ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.gen)
+plot(m.gra1_null)
+qqnorm(m.gra1_null, abline = c(0,1))
+
+##include weights
+m.gra1_weights <- lme(nr_kernels_per_head ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.gen)
+plot(m.gra1_weights)
+qqnorm(m.gra1_weights, abline = c(0,1))
+
+##compare models
+anova(m.gra1_null, m.gra1_weights) # --> include weights
+
+#Anova
+Anova(m.gra1_weights) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.gra1_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.gen$nr_kernels_per_head, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_gra1 <- create_anova_table(m.gra1_weights)[[1]]
+lab_anova_gra1 <- create_anova_table(m.gra1_weights)[[2]]
+
+# plot
+p.gra1 <- d.gen %>% 
+ ggplot_resp_box(x = wheat_var, y = nr_kernels_per_head, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Kernels per tiller") +
+   geom_richtext(aes(x = 0.5, y = 35, label = lab_anova_gra1),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+
+p.gra1
+
+t.anova_gra1 %>% select(-p_new) %>% kable(caption = "ANOVA number of kernels per tiller")
+```
+
+## Figure 6 – figure supplement 1b Kernel weight per head
+```{r include=FALSE}
+#lme
+## including position
+m.gra2 <- lme(weight_kernels_per_head ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.gen)
+Anova(m.gra2) # --> with pos_y
+
+##with weight
+m.gra2_null <- lme(weight_kernels_per_head ~ trt * wheat_var + pos_y, 
+                   random = ~ 1 | strip,
+                   data = d.gen)
+plot(m.gra2_null)
+qqnorm(m.gra2_null, abline = c(0,1))
+
+##include weights
+m.gra2_weights <- lme(weight_kernels_per_head ~ trt * wheat_var + pos_y, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.gen)
+plot(m.gra2_weights)
+qqnorm(m.gra2_weights, abline = c(0,1))
+
+##compare models
+anova(m.gra2_null, m.gra2_weights) # --> include weights
+
+#Anova
+Anova(m.gra2_weights) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.gra2_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.gen$weight_kernels_per_head, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_gra2 <- create_anova_table(m.gra2_weights)[[1]]
+lab_anova_gra2 <- create_anova_table(m.gra2_weights)[[2]]
+
+# plot
+p.gra2 <- d.gen %>% 
+ ggplot_resp_box(x = wheat_var, y = weight_kernels_per_head, 
+                 fill = trt, t.emmeans = TRUE) +
+   labs(y = "Kernel weight per tiller (g)") +
+   geom_richtext(aes(x = 0.5, y = 1.3, label = lab_anova_gra2),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+  scale_y_continuous(expand = expansion(mult = c(0.28, 0.1))) 
+
+p.gra2
+
+t.anova_gra2 %>% select(-p_new) %>% kable(caption = "ANOVA weight kernels per head")
+
+```
+
+
+## Figure 6 – figure supplement 1c Volume weight
+```{r include=FALSE}
+#lme
+## including position
+m.agro_vol <- lme(vol_weigh ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har)
+Anova(m.agro_vol) # --> without pos_y
+
+##without weight
+m.agro_vol_null <- lme(vol_weigh ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.har)
+plot(m.agro_vol_null)
+qqnorm(m.agro_vol_null, abline = c(0,1))
+
+##include weights
+m.agro_vol_weights <- lme(vol_weigh ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har)
+plot(m.agro_vol_weights)
+qqnorm(m.agro_vol_weights, abline = c(0,1))
+
+##compare models
+anova(m.agro_vol_null, m.agro_vol_weights) # --> without weights
+
+#Anova
+Anova(m.agro_vol_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.agro_vol_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har$vol_weigh, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_agro_vol <- create_anova_table(m.agro_vol_null)[[1]]
+lab_anova_agro_vol <- create_anova_table(m.agro_vol_null)[[2]]
+
+# plot
+p.vol_weigh <- d.har %>% 
+ ggplot_resp_box(x = wheat_var, y = vol_weigh, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Volume weight (kg/hectoliter)") +
+   geom_richtext(aes(x = 0.6, y = 87, label = lab_anova_agro_vol),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+   scale_y_continuous(expand = expansion(mult = c(0.1, 0.15)))
+
+p.vol_weigh
+
+t.anova_agro_vol %>% select(-p_new) %>% kable(caption = "ANOVA volume weight")
+
+```
+
+## Figure 6 – figure supplement 1d Kernel area
+```{r include=FALSE}
+#lme
+## including position
+m.agro_area <- lme(grain_area ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har)
+Anova(m.agro_area) # --> without pos_y
+
+##without weight
+m.agro_area_null <- lme(grain_area ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.har)
+plot(m.agro_area_null)
+qqnorm(m.agro_area_null, abline = c(0,1))
+
+##include weights
+m.agro_area_weights <- lme(grain_area ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har)
+plot(m.agro_area_weights)
+qqnorm(m.agro_area_weights, abline = c(0,1))
+
+##compare models
+anova(m.agro_area_null, m.agro_area_weights) # --> without weights
+
+#Anova
+Anova(m.agro_area_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.agro_area_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har$grain_area, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_agro_area <- create_anova_table(m.agro_area_null)[[1]]
+lab_anova_agro_area <- create_anova_table(m.agro_area_null)[[2]]
+
+# plot
+p.grain_area <- d.har %>% 
+ ggplot_resp_box(x = wheat_var, y = grain_area, fill = trt, t.emmeans = TRUE) +
+   labs(y = expression(paste("Kernel surface area (mm"^"2", ")"))) +
+   geom_richtext(aes(x = 0.6, y = 17.6, label = lab_anova_agro_area),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+   scale_y_continuous(expand = expansion(mult = c(0.1, 0.15)))
+
+p.grain_area
+
+t.anova_agro_area %>% select(-p_new) %>% kable(caption = "ANOVA area")
+```
+
+## Figure 6 – figure supplement 1e Kernel length
+```{r include=FALSE}
+#lme
+## including position
+m.agro_len <- lme(grain_length ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har)
+Anova(m.agro_len) # --> without pos_y
+
+##without weight
+m.agro_len_null <- lme(grain_length ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.har)
+plot(m.agro_len_null)
+qqnorm(m.agro_len_null, abline = c(0,1))
+
+##include weights
+m.agro_len_weights <- lme(grain_length ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har)
+plot(m.agro_len_weights)
+qqnorm(m.agro_len_weights, abline = c(0,1))
+
+##compare models
+anova(m.agro_len_null, m.agro_len_weights) # --> include weights
+
+#Anova
+Anova(m.agro_len_weights) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.agro_len_weights, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har$grain_length, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_agro_len <- create_anova_table(m.agro_len_weights)[[1]]
+lab_anova_agro_len <- create_anova_table(m.agro_len_weights)[[2]]
+
+# plot
+p.grain_length <- d.har %>% 
+ ggplot_resp_box(x = wheat_var, y = grain_length, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Kernel length (mm)") +
+   geom_richtext(aes(x = 0.6, y = 6.815, label = lab_anova_agro_len),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+   scale_y_continuous(expand = expansion(mult = c(0.1, 0.15)))
+
+p.grain_length
+
+t.anova_agro_len %>% select(-p_new) %>% kable(caption = "ANOVA length")
+```
+
+## Figure 6 – figure supplement 1f Kernel width
+```{r include=FALSE}
+#lme
+## including position
+m.agro_wid <- lme(grain_width ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har)
+Anova(m.agro_wid) # --> without pos_y
+
+##without weight
+m.agro_wid_null <- lme(grain_width ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.har)
+plot(m.agro_wid_null)
+qqnorm(m.agro_wid_null, abline = c(0,1))
+
+##include weights
+m.agro_wid_weights <- lme(grain_width ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har)
+plot(m.agro_wid_weights)
+qqnorm(m.agro_wid_weights, abline = c(0,1))
+
+##compare models
+anova(m.agro_wid_null, m.agro_wid_weights) # --> include weights
+
+#Anova
+Anova(m.agro_wid_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.agro_wid_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har$grain_width, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_agro_wid <- create_anova_table(m.agro_wid_null)[[1]]
+lab_anova_agro_wid <- create_anova_table(m.agro_wid_null)[[2]]
+
+# plot
+p.grain_width <- d.har %>% 
+ ggplot_resp_box(x = wheat_var, y = grain_width, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Kernel width (mm)") +
+   geom_richtext(aes(x = 0.6, y = 3.39, label = lab_anova_agro_wid),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+   scale_y_continuous(expand = expansion(mult = c(0.12, 0.1)))
+
+p.grain_width
+
+t.anova_agro_wid %>% select(-p_new) %>% kable(caption = "ANOVA width")
+
+```
+
+## Figure 6 – figure supplement 1g falling number
+```{r include=FALSE}
+d.har_red <- d.har %>%
+  as_tibble() %>% 
+  drop_na(falling_number)
+  
+#lme
+## including position
+m.agro_fal <- lme(falling_number ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har_red)
+Anova(m.agro_fal) # --> without pos_y
+
+##without weight
+m.agro_fal_null <- lme(falling_number ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.har_red)
+plot(m.agro_fal_null)
+qqnorm(m.agro_fal_null, abline = c(0,1))
+
+##include weights
+m.agro_fal_weights <- lme(falling_number ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har_red)
+plot(m.agro_fal_weights)
+qqnorm(m.agro_fal_weights, abline = c(0,1))
+
+##compare models
+anova(m.agro_fal_null, m.agro_fal_weights) # --> without weights
+
+#Anova
+Anova(m.agro_fal_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.agro_fal_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har_red$falling_number, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_agro_fal <- create_anova_table(m.agro_fal_null)[[1]]
+lab_anova_agro_fal <- create_anova_table(m.agro_fal_null)[[2]]
+
+# plot
+p.falling_number <- d.har_red %>% 
+ ggplot_resp_box(x = wheat_var, y = falling_number, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Falling Number (s)") +
+   geom_richtext(aes(x = 0.6, y = 450, label = lab_anova_agro_fal),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+   scale_y_continuous(expand = expansion(mult = c(0.1, 0.15)))
+
+p.falling_number
+
+t.anova_agro_fal %>% select(-p_new) %>% kable(caption = "ANOVA falling number")
+
+```
+
+## Figure 6 – figure supplement 1h water absorption
+```{r include=FALSE}
+#lme
+## including position
+m.agro_wat <- lme(water_absorption ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har)
+Anova(m.agro_wat) # --> without pos_y
+
+##without weight
+m.agro_wat_null <- lme(water_absorption ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.har)
+plot(m.agro_wat_null)
+qqnorm(m.agro_wat_null, abline = c(0,1))
+
+##include weights
+m.agro_wat_weights <- lme(water_absorption ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har)
+plot(m.agro_wat_weights)
+qqnorm(m.agro_wat_weights, abline = c(0,1))
+
+##compare models
+anova(m.agro_wat_null, m.agro_wat_weights) # --> without weights
+
+#Anova
+Anova(m.agro_wat_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.agro_wat_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har$water_absorption, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_agro_wat <- create_anova_table(m.agro_wat_null)[[1]]
+lab_anova_agro_wat <- create_anova_table(m.agro_wat_null)[[2]]
+
+# plot
+p.water_absorption <- d.har %>% 
+ ggplot_resp_box(x = wheat_var, y = water_absorption, fill = trt, t.emmeans = TRUE) +
+   labs(y = "Dough water absorption (%)") +
+   geom_richtext(aes(x = 1.6, y = 69.5, label = lab_anova_agro_wat),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.2, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+   scale_y_continuous(expand = expansion(mult = c(0.1, 0.1)))
+
+p.water_absorption
+
+t.anova_agro_wat %>% select(-p_new) %>% kable(caption = "ANOVA water absorption")
+
+```
+
+## Figure 6 – figure supplement 1i  dough softening
+```{r include=FALSE}
+d.har_red <- d.har %>%
+  as_tibble() %>% 
+  drop_na(dough_softening)
+
+#lme
+## including position
+m.agro_soft <- lme(dough_softening ~ trt * wheat_var + pos_y, 
+              random = ~ 1 | strip,
+              data = d.har_red)
+Anova(m.agro_soft) # --> without pos_y
+
+##without weight
+m.agro_soft_null <- lme(dough_softening ~ trt * wheat_var, 
+                   random = ~ 1 | strip,
+                   data = d.har_red)
+plot(m.agro_soft_null)
+qqnorm(m.agro_soft_null, abline = c(0,1))
+
+##include weights
+m.agro_soft_weights <- lme(dough_softening ~ trt * wheat_var, 
+                      random = ~ 1 | strip,
+                      weights = varIdent(form = ~ 1 |
+                                           trt * wheat_var),
+                      data = d.har_red)
+plot(m.agro_soft_weights)
+qqnorm(m.agro_soft_weights, abline = c(0,1))
+
+##compare models
+anova(m.agro_soft_null, m.agro_soft_weights) # --> without weights
+
+#Anova
+Anova(m.agro_soft_null) 
+
+# post-hoc test for p-val
+tab.emm <- emmeans(m.agro_soft_null, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(d.har_red$dough_softening, na.rm = TRUE) * 1.03,
+            trt = NA) %>%  print()
+
+```
+
+
+```{r echo=FALSE, warning=FALSE}
+# tidy anova table
+t.anova_agro_soft <- create_anova_table(m.agro_soft_null)[[1]]
+lab_anova_agro_soft <- create_anova_table(m.agro_soft_null)[[2]]
+
+# plot
+p.dough_softening <- d.har %>% 
+ ggplot_resp_box(x = wheat_var, y = dough_softening,
+                 fill = trt, t.emmeans = TRUE) +
+   labs(y = "Dough softening (FU)") +
+   geom_richtext(aes(x = 1.15, y = 145, label = lab_anova_agro_soft),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.1, 3), "lines"),
+                hjust = 0,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines")) +
+   scale_y_continuous(expand = expansion(mult = c(0.1, 0.15)))
+
+p.dough_softening
+
+t.anova_agro_soft %>% select(-p_new) %>% kable(caption = "ANOVA dough softening")
+```
+
+### Combine plots Figure 6 – figure supplement 1
+```{r fig.width=10, fig.height=10, echo=FALSE, warning=FALSE}
+fig_sup <- plot_grid(
+               p.gra1 + theme(legend.position="none", 
+                                   axis.title.x = element_blank()),
+               p.gra2 + theme(legend.position="none", 
+                                   axis.title.x = element_blank()),
+               p.vol_weigh + theme(legend.position="none", 
+                                   axis.title.x = element_blank()),
+               p.grain_area + theme(legend.position="none", 
+                                    axis.title.x = element_blank()),
+               p.grain_length + theme(legend.position="none", 
+                                      axis.title.x = element_blank()),
+               p.grain_width + theme(legend.position="none", 
+                                     axis.title.x = element_blank()),
+               p.falling_number + theme(legend.position="none"),
+               p.water_absorption + theme(legend.position="none"),
+               p.dough_softening + theme(legend.position="none"),
+               labels = LETTERS[1:9],
+               align = "v",
+               ncol = 3,
+               rel_heights = c(1, 1, 1, 1, 1.09, 1.09))
+
+# add legend
+legend <- get_legend(p.vol_weigh)
+fig_sup <- plot_grid(legend, fig_sup, nrow = 2, rel_heights = c(.05, 1))
+
+# save
+fig_sup
+
+ggsave(plot = fig_sup, here("Figures", "Fig.6_sup_1.svg"), 
+       width = 24, height =  25, units = "cm")
+```
+
+
+# Figure 6 – figure supplement 2
+## Figure 6 – figure supplement 2 Trace elements
+```{r include=FALSE}
+d.kern_ele_ <- read_delim(here("Data", "phen_kernel_giub.csv"),
+                         delim = ",", col_names = TRUE) %>% 
+  mutate(trt = factor(trt, levels = c("W", "b")),
+         strip = case_when(
+           pos_y == 4.5   ~ "strip_01",
+           pos_y == 13.5  ~ "strip_02",
+           pos_y == 22.5  ~ "strip_03",
+           pos_y == 31.5  ~ "strip_04",
+           pos_y == 40.5  ~ "strip_05",
+           pos_y == 49.5  ~ "strip_06",
+           pos_y == 58.5  ~ "strip_07",
+           pos_y == 67.5  ~ "strip_08",
+           pos_y == 76.5  ~ "strip_09",
+           pos_y == 85.5  ~ "strip_10")) %>% 
+  as.data.frame()
+
+# remove clear outlier
+d.kern_ele_ <- d.kern_ele_[d.kern_ele_$sample_id != "bx06", ] # remove outlier 
+
+tibble(a = d.kern_ele_ %>% colnames(), y = c(1:27)) %>% print(n=26)
+
+# make data frame long format and tidy element names
+d.kern_ele_long <- d.kern_ele_ %>% 
+   pivot_longer(6:26, names_to = "element", values_to = "quantity") %>%            
+   mutate(element = str_replace(element, "mg/kg", ""),
+          element = str_replace(element, "56", ""),
+          element = str_replace(element, "43", ""),
+          element = str_replace(element, "nogas", ""),
+          element = str_replace(element, "[\\[]\\]", ""))
+
+d.kern_ele_long %>% str()
+d.kern_ele_long %>% summary()
+
+ele_all <- d.kern_ele_long %>% pull(element) %>% unique() %>% sort() %>% 
+  print()
+d.kern_ele_long %>% pull(element) %>% unique() %>% length()
+
+```
+
+
+```{r include=FALSE}
+# calculate individual ANOVAS
+
+# function for emmeans table
+calc.tab.emm_ele <- function(data, model) {
+  emmeans(model, specs = pairwise ~ trt | wheat_var) %>% 
+  .$contrasts %>%
+     rbind(adjust = "fdr") %>% 
+     summary(infer = TRUE) %>% tibble() %>% 
+     mutate(max.y = max(data$quantity, na.rm = TRUE) * 1.06,
+            trt = NA,
+            element = paste(data$element[1])) %>%
+    select(-c(lower.CL, upper.CL, t.ratio)) %>% 
+    return()
+}
+
+```
+
+```{r warning=FALSE, include=FALSE}
+# Al
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Al") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Al_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Al.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+anova(m.ele_Al.weight, m.ele_Al_null) # --> without weights
+
+#without weight
+m.ele_Al <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Al)
+plot(m.ele_Al) 
+t.anova_Al.lm <- Anova(m.ele_Al) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Al <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Al)%>% print()
+
+
+# As
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "As") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_As_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_As.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+anova(m.ele_As.weight, m.ele_As_null) # --> without weights
+
+# lm
+m.ele_As <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_As)
+plot(m.ele_As) 
+t.anova_As.lm <- Anova(m.ele_As) %>% print()
+
+
+# post-hoc test for p-val
+tab.emm_ele_As <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_As)%>% print()
+
+
+# Ba
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Ba") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Ba_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Ba.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Ba.weight, m.ele_Ba_null) # --> without weights
+
+#without weights
+m.ele_Ba <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Ba)
+plot(m.ele_Ba) 
+t.anova_Ba.lm <- Anova(m.ele_Ba) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Ba <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Ba)%>% print()
+
+# Ca
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Ca") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Ca_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Ca.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+anova(m.ele_Ca.weight, m.ele_Ca_null) # --> without weights
+
+# without weights
+m.ele_Ca <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Ca)
+plot(m.ele_Ca) 
+t.anova_Ca.lm <- Anova(m.ele_Ca) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Ca <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Ca)%>% print()
+
+
+# Cd
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Cd") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Cd_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Cd.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Cd.weight, m.ele_Cd_null) # --> without weights
+
+# without weights
+m.ele_Cd <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Cd)
+plot(m.ele_Cd) 
+t.anova_Cd.lm <- Anova(m.ele_Cd) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Cd <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Cd)%>% print()
+
+
+# Ce
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Ce") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Ce_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Ce.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Ce.weight, m.ele_Ce_null) # --> without weights
+
+# without weights
+m.ele_Ce <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Ce)
+plot(m.ele_Ce) 
+t.anova_Ce.lm <- Anova(m.ele_Ce) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Ce <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Ce)%>% print()
+
+
+# Cr
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Cr") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Cr_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Cr.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Cr.weight, m.ele_Cr_null) # --> without weights
+
+# without weights
+m.ele_Cr <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Cr)
+plot(m.ele_Cr) 
+t.anova_Cr.lm <- Anova(m.ele_Cr) %>% print()
+
+# lme
+plot(m.ele_Cr.weight)
+qqnorm(m.ele_Cr.weight, abline = c(0,1))
+
+# Post-hoc test for p-val
+tab.emm_ele_Cr <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Cr)%>% print()
+
+
+# Cs
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Cs") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Cs_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Cs.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Cs.weight, m.ele_Cs_null) # --> without weights
+
+# without weights
+m.ele_Cs <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Cs)
+plot(m.ele_Cs) 
+t.anova_Cs.lm <- Anova(m.ele_Cs) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Cs <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Cs)%>% print()
+
+
+# Cu
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Cu") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Cu_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Cu.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Cu.weight, m.ele_Cu_null) # --> without weights
+
+# without weights
+m.ele_Cu <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Cu)
+plot(m.ele_Cu) 
+t.anova_Cu.lm <- Anova(m.ele_Cu) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Cu <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Cu)%>% print()
+
+
+# Fe
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Fe") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Fe_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Fe.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Fe.weight, m.ele_Fe_null) # --> without weights
+
+# without weights
+m.ele_Fe <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Fe)
+plot(m.ele_Fe) 
+t.anova_Fe.lm <- Anova(m.ele_Fe) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Fe <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Fe)%>% print()
+
+
+# Ga
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Ga") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Ga_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Ga.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Ga.weight, m.ele_Ga_null) # --> without weights
+
+# without weights
+m.ele_Ga <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Ga)
+plot(m.ele_Ga) 
+t.anova_Ga.lm <- Anova(m.ele_Ga) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Ga <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Ga)%>% print()
+
+
+# K
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "K") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_K_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_K.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_K.weight, m.ele_K_null) # --> without weights
+
+# without weights
+m.ele_K <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_K)
+plot(m.ele_K) 
+t.anova_K.lm <- Anova(m.ele_K) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_K <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_K)%>% print()
+
+
+# Mg
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Mg") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Mg_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Mg.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Mg.weight, m.ele_Mg_null) # --> without weights
+
+# without weights
+m.ele_Mg <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Mg)
+plot(m.ele_Mg) 
+t.anova_Mg.lm <- Anova(m.ele_Mg) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Mg <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Mg)%>% print()
+
+
+# Mn
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Mn") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Mn_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Mn.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Mn.weight, m.ele_Mn_null) # --> without weights
+
+# without weights
+m.ele_Mn <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Mn)
+plot(m.ele_Mn) 
+t.anova_Mn.lm <- Anova(m.ele_Mn) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Mn <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Mn)%>% print()
+
+
+# Na
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Na") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Na_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Na.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Na.weight, m.ele_Na_null) # --> without weights
+
+# without weights
+m.ele_Na <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Na)
+plot(m.ele_Na) 
+t.anova_Na.lm <- Anova(m.ele_Na) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Na <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Na)%>% print()
+
+
+# Ni
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Ni") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Ni_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Ni.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Ni.weight, m.ele_Ni_null) # --> without weights
+
+# lm
+m.ele_Ni <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Ni)
+plot(m.ele_Ni) 
+t.anova_Ni.lm <- Anova(m.ele_Ni) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Ni <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Ni)%>% print()
+
+
+# P
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "P") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_P_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_P.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_P.weight, m.ele_P_null) # --> without weights
+
+# without weights
+m.ele_P <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_P)
+plot(m.ele_P) 
+t.anova_P.lm <- Anova(m.ele_P) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_P <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_P)%>% print()
+
+
+# Rb
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Rb") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Rb_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Rb.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Rb.weight, m.ele_Rb_null) # --> with weights
+
+summary(m.ele_Rb.weight)
+plot(m.ele_Rb.weight) 
+t.anova_Rb.lm <- Anova(m.ele_Rb.weight) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Rb <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Rb.weight)%>% print()
+
+
+# Sr
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Sr") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Sr_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Sr.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Sr.weight, m.ele_Sr_null) # --> without weights
+
+#  without weights
+m.ele_Sr <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Sr)
+plot(m.ele_Sr) 
+t.anova_Sr.lm <- Anova(m.ele_Sr) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Sr <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Sr)%>% print()
+
+
+# V
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "V") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_V_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_V.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_V.weight, m.ele_V_null) # --> without weights
+
+#  without weights
+m.ele_V <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_V)
+plot(m.ele_V) 
+t.anova_V.lm <- Anova(m.ele_V) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_V <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_V)%>% print()
+
+
+# Zn
+d.kern_ele_red <- d.kern_ele_long %>% 
+  filter(element == "Zn") %>% 
+  as_tibble() %>% 
+  drop_na(quantity)
+
+# lme
+m.ele_Zn_null <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+m.ele_Zn.weight <-  lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red,
+                   weights = varIdent(form = ~ 1 | trt * wheat_var))
+
+
+anova(m.ele_Zn.weight, m.ele_Zn_null) # --> without weights
+
+#  without weights
+m.ele_Zn <- lme(quantity ~ trt * wheat_var, random = ~1|strip, data = d.kern_ele_red)
+summary(m.ele_Zn)
+plot(m.ele_Zn) 
+t.anova_Zn.lm <- Anova(m.ele_Zn) %>% print()
+
+# post-hoc test for p-val
+tab.emm_ele_Zn <- calc.tab.emm_ele(data = d.kern_ele_red, model = m.ele_Zn)%>% print()
+
+
+# combine all tab.emm
+tab.emm <- bind_rows(tab.emm_ele_Al, tab.emm_ele_As, tab.emm_ele_Ba, 
+                     tab.emm_ele_Ca, tab.emm_ele_Cd, tab.emm_ele_Ce,
+                     tab.emm_ele_Cr, tab.emm_ele_Cs, tab.emm_ele_Cu,
+                     tab.emm_ele_Fe, tab.emm_ele_Ga, tab.emm_ele_K,
+                     tab.emm_ele_Mg, tab.emm_ele_Mn, tab.emm_ele_Na,
+                     tab.emm_ele_Ni, tab.emm_ele_P,  tab.emm_ele_Rb,
+                     tab.emm_ele_Sr, tab.emm_ele_V,  tab.emm_ele_Zn)
+
+# prepare ANOVA labels for ggplot
+lab.Al <- output_anova_ele(t.anova_Al.lm)
+lab.As <- output_anova_ele(t.anova_As.lm)
+lab.Ba <- output_anova_ele(t.anova_Ba.lm)
+lab.Ca <- output_anova_ele(t.anova_Ca.lm)
+lab.Cd <- output_anova_ele(t.anova_Cd.lm)
+lab.Ce <- output_anova_ele(t.anova_Ce.lm)
+lab.Cr <- output_anova_ele(t.anova_Cr.lm)
+lab.Cs <- output_anova_ele(t.anova_Cs.lm)
+lab.Cu <- output_anova_ele(t.anova_Cu.lm)
+lab.Fe <- output_anova_ele(t.anova_Fe.lm)
+lab.Ga <- output_anova_ele(t.anova_Ga.lm)
+lab.K  <- output_anova_ele(t.anova_K.lm)
+lab.Mg <- output_anova_ele(t.anova_Mg.lm)
+lab.Mn <- output_anova_ele(t.anova_Mn.lm)
+lab.Na <- output_anova_ele(t.anova_Na.lm)
+lab.Ni <- output_anova_ele(t.anova_Ni.lm)
+lab.P  <- output_anova_ele(t.anova_P.lm)
+lab.Rb <- output_anova_ele(t.anova_Rb.lm)
+lab.Sr <- output_anova_ele(t.anova_Sr.lm)
+lab.V  <- output_anova_ele(t.anova_V.lm)
+lab.Zn <- output_anova_ele(t.anova_Zn.lm)
+
+```
+
+```{r fig.width=12, fig.height=16, echo=FALSE, warning=FALSE}
+add_anova_tab_ele <- function(tab, x, y, ele,  ...) {
+  geom_richtext(data = data.frame(element = {{ele}}), 
+                mapping =  aes(x = {{x}}, y = {{y}}, label = {{tab}}),
+                stat = "unique",
+                fill = "white", label.color = "white", 
+                label.padding = grid::unit(rep(0.1, 3), "lines"),
+                hjust = 0.5,
+                vjust = 1, size = 3,
+                label.r = unit(0, "lines"))
+}
+
+p.ele_sup <- d.kern_ele_long %>%
+ ggplot_resp_box(x = wheat_var, y = quantity, fill = trt, t.emmeans = TRUE) +
+  labs(y = "Concentration (mg/kg)") +
+  facet_wrap(vars(element), nrow = 7, scales = "free") +
+  scale_y_continuous(expand = expansion(mult = c(0.1, 0.12))) +
+  add_anova_tab_ele(tab = lab.Al, x = 1.5, y = 3.2, ele = "Al") +
+  add_anova_tab_ele(tab = lab.As, x = 1.5, y = 0.009, ele = "As") +
+  add_anova_tab_ele(tab = lab.Ba, x = 1.5, y = 5.5, ele = "Ba") +
+  add_anova_tab_ele(tab = lab.Ca, x = 1.5, y = 75, ele = "Ca") +
+  add_anova_tab_ele(tab = lab.Cd, x = 1.5, y = 0.052, ele = "Cd") +
+  add_anova_tab_ele(tab = lab.Ce, x = 1.5, y = 0.002, ele = "Ce") +
+  add_anova_tab_ele(tab = lab.Cr, x = 1.5, y = 0.18, ele = "Cr") +
+  add_anova_tab_ele(tab = lab.Cs, x = 1.5, y = 0.007, ele = "Cs") +
+  add_anova_tab_ele(tab = lab.Cu, x = 1.5, y = 12, ele = "Cu") +
+  add_anova_tab_ele(tab = lab.Fe, x = 1.5, y = 53, ele = "Fe") +
+  add_anova_tab_ele(tab = lab.Ga, x = 1.5, y = 1.65, ele = "Ga") +
+  add_anova_tab_ele(tab = lab.K,  x = 1.5, y = 7000, ele = "K") +
+  add_anova_tab_ele(tab = lab.Mg, x = 1.5, y = 2000, ele = "Mg") +
+  add_anova_tab_ele(tab = lab.Mn, x = 1.5, y = 68, ele = "Mn") +
+  add_anova_tab_ele(tab = lab.Na, x = 1.5, y = 14, ele = "Na") +
+  add_anova_tab_ele(tab = lab.Ni, x = 1.5, y = 0.4, ele = "Ni") +
+  add_anova_tab_ele(tab = lab.P,  x = 1.5, y = 5700, ele = "P") +
+  add_anova_tab_ele(tab = lab.Rb, x = 1.5, y = 6.3, ele = "Rb") +
+  add_anova_tab_ele(tab = lab.Sr, x = 1.5, y = 2.9, ele = "Sr") +
+  add_anova_tab_ele(tab = lab.V,  x = 1.5, y = 0.0055, ele = "V") +
+  add_anova_tab_ele(tab = lab.Zn, x = 1.5, y = 34, ele = "Zn")
+
+p.ele_sup
+
+ggsave(here("Figures", "Fig.6_sup_2.svg"), 
+       width = 28, height =  34, units = "cm")
+```
+
+# Version control
+```{r}
+sessionInfo()
+```
+
+<!-- > sessionInfo() -->
+<!-- R version 4.1.2 (2021-11-01) -->
+<!-- Platform: x86_64-w64-mingw32/x64 (64-bit) -->
+<!-- Running under: Windows 10 x64 (build 19044) -->
+
+<!-- Matrix products: default -->
+
+<!-- locale: -->
+<!-- [1] LC_COLLATE=English_United States.1252  LC_CTYPE=English_United States.1252    -->
+<!-- [3] LC_MONETARY=English_United States.1252 LC_NUMERIC=C                           -->
+<!-- [5] LC_TIME=English_United States.1252     -->
+
+<!-- attached base packages: -->
+<!-- [1] stats     graphics  grDevices utils     datasets  methods   base      -->
+
+<!-- other attached packages: -->
+<!--  [1] factoextra_1.0.7 FactoMineR_2.4   missMDA_1.18     knitr_1.37       here_1.0.1       nlme_3.1-153     -->
+<!--  [7] car_3.0-12       carData_3.0-5    emmeans_1.7.2    cowplot_1.1.1    ggtext_0.1.1     ggpubr_0.4.0     -->
+<!-- [13] ggbeeswarm_0.6.0 forcats_0.5.1    stringr_1.4.0    dplyr_1.0.7      purrr_0.3.4      readr_2.1.1      -->
+<!-- [19] tidyr_1.1.4      tibble_3.1.6     ggplot2_3.3.5    tidyverse_1.3.1  -->
+
+<!-- loaded via a namespace (and not attached): -->
+<!--  [1] TH.data_1.1-0        colorspace_2.0-2     ggsignif_0.6.3       ellipsis_0.3.2       rprojroot_2.0.2      -->
+<!--  [6] estimability_1.3     markdown_1.1         fs_1.5.2             gridtext_0.1.4       rstudioapi_0.13      -->
+<!-- [11] mice_3.14.0          farver_2.1.0         bit64_4.0.5          ggrepel_0.9.1        DT_0.20              -->
+<!-- [16] fansi_0.5.0          mvtnorm_1.1-3        lubridate_1.8.0      xml2_1.3.3           codetools_0.2-18     -->
+<!-- [21] splines_4.1.2        leaps_3.1            doParallel_1.0.16    jsonlite_1.7.2       broom_0.7.11         -->
+<!-- [26] cluster_2.1.2        dbplyr_2.1.1         compiler_4.1.2       httr_1.4.2           backports_1.4.1      -->
+<!-- [31] assertthat_0.2.1     Matrix_1.3-4         fastmap_1.1.0        cli_3.1.0            htmltools_0.5.2      -->
+<!-- [36] tools_4.1.2          coda_0.19-4          gtable_0.3.0         glue_1.6.0           Rcpp_1.0.7           -->
+<!-- [41] cellranger_1.1.0     vctrs_0.3.8          svglite_2.0.0        iterators_1.0.13     xfun_0.29            -->
+<!-- [46] rvest_1.0.2          lifecycle_1.0.1      rstatix_0.7.0        MASS_7.3-54          zoo_1.8-9            -->
+<!-- [51] scales_1.1.1         vroom_1.5.7          ragg_1.2.1           hms_1.1.1            parallel_4.1.2       -->
+<!-- [56] sandwich_3.0-1       yaml_2.2.1           stringi_1.7.6        highr_0.9            foreach_1.5.1        -->
+<!-- [61] rlang_0.4.12         pkgconfig_2.0.3      systemfonts_1.0.3    evaluate_0.14        lattice_0.20-45      -->
+<!-- [66] htmlwidgets_1.5.4    labeling_0.4.2       bit_4.0.4            tidyselect_1.1.1     magrittr_2.0.1       -->
+<!-- [71] R6_2.5.1             generics_0.1.1       multcomp_1.4-18      DBI_1.1.2            pillar_1.6.4         -->
+<!-- [76] haven_2.4.3          withr_2.4.3          survival_3.2-13      scatterplot3d_0.3-41 abind_1.4-5          -->
+<!-- [81] modelr_0.1.8         crayon_1.4.2         utf8_1.2.2           tzdb_0.2.0           rmarkdown_2.11       -->
+<!-- [86] grid_4.1.2           readxl_1.3.1         reprex_2.0.1         digest_0.6.29        flashClust_1.01-2    -->
+<!-- [91] xtable_1.8-4         numDeriv_2016.8-1.1  textshaping_0.3.6    munsell_0.5.0        beeswarm_0.4.0       -->
+<!-- [96] vipor_0.4.5          -->
